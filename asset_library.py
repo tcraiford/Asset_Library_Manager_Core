@@ -4,7 +4,8 @@ import subprocess
 import sys
 
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, QVBoxLayout, QPushButton,
-                               QFileDialog, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem)
+                               QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
+                               QMenu)
 from PySide6.QtCore import Qt
 from pathlib import Path
 
@@ -122,6 +123,7 @@ class AssetLibraryApp(QMainWindow):
 
         self.directory_line = QLineEdit()
         self.directory_line.setPlaceholderText("Enter the base directory path here...")
+        self.directory_line.setReadOnly(True)
         self.directory_line.returnPressed.connect(self.set_base_directory)
         open_dir_button = QPushButton("Open Directory")
         open_dir_button.clicked.connect(self.open_directory)
@@ -148,12 +150,46 @@ class AssetLibraryApp(QMainWindow):
         main_layout.addLayout(dir_layout)
         main_layout.addLayout(list_layout)
 
+        # add gear icon on top right
+        self.gear_button = QToolButton(self)
+        self.gear_button.setText("⚙")
+        self.gear_button.setPopupMode(QToolButton.InstantPopup)
+
+        #dropdown menu options
+        gear_menu = QMenu(self)
+        # add gear_menu functions here. Format is string for displayed menu option and then the function
+        gear_menu.addAction("Create Starting Library", self.create_starting_library)
+        gear_menu.addAction("Change Library Directory", self.change_directory)
+        # tells the gear_button that the menu it is pulling content from is named gear_menu
+        self.gear_button.setMenu(gear_menu)
+        # position the gear_button top right always
+        self.position_gear_button()
+    
+    def position_gear_button(self):
+        # calculate the x position of the button (window width - button width - margin)
+        x_pos = self.width() - 25 - 10
+        self.gear_button.setGeometry(x_pos, 10 , 25, 25)
+
+    # built in event in Qt that DOES NOT NEED TO BE CALLED. It is called automatically
+    def resizeEvent(self, event):
+        # recalculate position of gear_button when window is resized
+        self.position_gear_button()
+        super().resizeEvent(event)
+
+    def change_directory(self):
+        self.check_admin_access()
+        self.directory_line.setReadOnly(False)
 
     def create_starting_library(self):
         if self.check_admin_access():
             self.set_base_directory()
             starting_library_path = self.directory_line.text()
             create_starting_library(starting_library_path)
+            # creates variable new path and adds "Asset_Library" to the "pathed" self.directory_line
+            new_path = Path(self.directory_line.text()) / "Asset_Library"
+            # converts new_path from a Path to plain text and plugs it into the directory_line
+            self.directory_line.setText(str(new_path))
+            self.set_base_directory()
 
     def set_base_directory(self):
         self.current_directory = self.directory_line.text()
@@ -161,6 +197,7 @@ class AssetLibraryApp(QMainWindow):
             QMessageBox.warning(self, "Directory Not Found", "The specified directory does not exist.")
 
         else:
+            # innitiates the first list box
             self.populate_list(Path(self.current_directory), self.category_list)
 
     def check_admin_access(self):
@@ -186,6 +223,7 @@ class AssetLibraryApp(QMainWindow):
         # clear out any old text each time this is called
         list_widget.clear()
 
+        folder_path = Path(folder_path)
         # looks at all items in this directory
         for path in sorted(folder_path.iterdir()):
             # .is_dir only passes true if the item inside this folder is a folder
@@ -251,8 +289,3 @@ if __name__ == "__main__":
     window = AssetLibraryApp()
     window.show()
     app.exec()
-
-    """# establish the base directory
-    base_directory = input("Enter the base directory path for the asset library:\n"
-    "if one does not exist, this is where it will be created.\n")
-    base_directory_path = create_starting_library()"""
