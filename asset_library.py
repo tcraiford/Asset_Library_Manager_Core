@@ -2,11 +2,13 @@ import shutil
 import os
 import subprocess
 import sys
+import configparser
 
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, QVBoxLayout, QPushButton,
                                QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
                                QMenu)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from pathlib import Path
 
 # check if all necessary packages are installed and if not, offer to install them
@@ -30,16 +32,28 @@ def required_checks():
         else:
             sys.exit("Exiting program. Please install the missing libraries and try again.")
 
+'''# setup checks
+def startup():
+    # initialize the config parser
+    config = configparser.ConfigParser()
+    # read the settings.ini file
+    config.read("settings.ini")
+    library_path_string = config["LibraryDirectory"]["library_dir"]
+    print(f"Library directory is {library_path_string}")
+    return(library_path_string)'''
+
 # creates a basic starting library to be built upon. This is a starting point for the asset library
-def create_starting_library(base_directory_path): 
-    # create a list of subfolders to be created in the starting library
-    subfolders = [
-        "Hero",
-        "Character/Human", "Character/Lion", "Character/Giraffe", "Character/Elephant", "Character/Monkey",
-        "Environment/Buildings", "Environment/Lights", "Environment/Furniture", "Environment/Vehicles", "Environment/Machines", "Environment/Structures",
-        "Vegetation/Trees", "Vegetation/Grass", "Vegetation/Flowers", "Vegetation/Shrubs", "Vegetation/Plants",
-        "Utility"
-    ]
+def create_starting_library(base_directory_path):
+    subfolders = []
+    # opens starting_library.txt and saves each line as a new directory to be created
+    with open("starting_library.txt", 'r') as file:
+        # open the file and read only one line at a time
+        for line in file:
+            # check if the line is blank
+            if line.strip():
+                # if it has text, strip the newline from the end and add it to the list
+                subfolders.append(line.strip())
+
     
     base_directory_path = Path(base_directory_path)
 
@@ -98,8 +112,12 @@ class AssetLibraryApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Asset Library Manager")
-        self.resize(500, 300)
+        self.resize(500, 600)
         self.current_directory = ""
+        # the list of geometry files found inside sub_subcategory_list
+        self.geometry_file_list = []
+        # directory of the thumbnail for the selected asset in sub_subcategory_list
+        self.thumbnail_dir = ""
 
         # password protection for some actions
         self.HARDCODED_PASSWORD = "0000"
@@ -109,11 +127,14 @@ class AssetLibraryApp(QMainWindow):
         self.category_list = QListWidget()
         self.subcategory_list = QListWidget()
         self.sub_subcategory_list = QListWidget()
+        self.asset_folder_contents_list = QListWidget()
         # When a user selects a main category, run the "load_subcategories" method
         # this is just another activation, similar to clicked for a button widget
         self.category_list.itemSelectionChanged.connect(self.load_subcategories)
         # when a user selects a subcategory from the subcategory list, load the sub_subcategories
         self.subcategory_list.itemSelectionChanged.connect(self.load_sub_subcategories)
+        # when a user selects an asset folder in the sub_subcategory list, walk and load the contents of that asset folder
+        self.sub_subcategory_list.itemSelectionChanged.connect(self.load_asset_folder_contents)
 
         # category list layout
         list_layout = QHBoxLayout()
@@ -121,14 +142,31 @@ class AssetLibraryApp(QMainWindow):
         list_layout.addWidget(self.subcategory_list)
         list_layout.addWidget(self.sub_subcategory_list)
 
+        # asset folder contents layout
+        asset_options_layout = QHBoxLayout()
+        asset_options_layout.addWidget(self.asset_folder_contents_list)
+        # create and add the thumbnail
+        self.preview_thumbnail = QLabel()
+        # makes sure the thumbnail scales properly
+        self.preview_thumbnail.setScaledContents(True)
+        self.preview_thumbnail.setFixedSize(256, 256)
+        asset_options_layout.addWidget(self.preview_thumbnail)
+
+
         self.directory_line = QLineEdit()
         self.directory_line.setPlaceholderText("Enter the base directory path here...")
         self.directory_line.setReadOnly(True)
         self.directory_line.returnPressed.connect(self.set_base_directory)
-        open_dir_button = QPushButton("Open Directory")
+        '''create self variable to hold library from settings.ini and then next line
+        sets it into the directory_line'''
+        self.library_path = self.settings_pull()
+        self.directory_line.setText(self.library_path)
+        # innitialize the directory. Without this, the lists will remain blank until set_base_directory is called later
+        self.set_base_directory()
+        open_dir_button = QPushButton("Open Library")
         open_dir_button.clicked.connect(self.open_directory)
-        create_library_button = QPushButton("Create Starting Library")
-        create_library_button.clicked.connect(self.create_starting_library)
+        #create_library_button = QPushButton("Create Starting Library")
+        #create_library_button.clicked.connect(self.create_starting_library)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -143,12 +181,12 @@ class AssetLibraryApp(QMainWindow):
         dir_layout = QHBoxLayout()
         dir_layout.addWidget(self.directory_line)
         dir_layout.addWidget(open_dir_button)
-        dir_layout.addWidget(create_library_button)
 
         # define the positioning of content on the main_layout tool
         main_layout.addWidget(description)
         main_layout.addLayout(dir_layout)
         main_layout.addLayout(list_layout)
+        main_layout.addLayout(asset_options_layout)
 
         # add gear icon on top right
         self.gear_button = QToolButton(self)
@@ -177,8 +215,15 @@ class AssetLibraryApp(QMainWindow):
         super().resizeEvent(event)
 
     def change_directory(self):
-        self.check_admin_access()
-        self.directory_line.setReadOnly(False)
+        if self.check_admin_access():
+            self.directory_line.setReadOnly(False)
+
+    # pulls the starting directory from the settings.ini file
+    def settings_pull(self):
+        # initialize the configparser
+        config = configparser.ConfigParser()
+        config.read("settings.ini")
+        return config["LibraryDirectory"]["library_dir"]
 
     def create_starting_library(self):
         if self.check_admin_access():
@@ -243,6 +288,10 @@ class AssetLibraryApp(QMainWindow):
         # wipe downstream columns clean so if you change your category selection, it doesn't get confused by your subcategory selection data
         self.subcategory_list.clear()
         self.sub_subcategory_list.clear()
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
 
         # get whatever item is currently selected
         selected_items = self.category_list.selectedItems()
@@ -259,8 +308,12 @@ class AssetLibraryApp(QMainWindow):
 
     """This follows the same logic as load_subcategories but it triggers when an item in column 2 is clicked, clears out only column 3, and populates column 3. """
     def load_sub_subcategories(self):
-        # wipe only the final column clean. We don't want to wipe the column above us
+        # wipe the final column clean. We don't want to wipe the column above us
         self.sub_subcategory_list.clear()
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
 
         # determine which row was highlighted in the subcategory list
         selected_items = self.subcategory_list.selectedItems()
@@ -275,16 +328,68 @@ class AssetLibraryApp(QMainWindow):
             # runs the populate_list method and feeds it the file path for the selection we just established and also tells the populate list method we want to send that data to the sub_subcategory_list)
             self.populate_list(next_folder_path, self.sub_subcategory_list)
 
+
+    def load_asset_folder_contents(self):
+        # wipe the contents of asset_folder_contents_list
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
+
+        # get the selected asset in the sub_subcategory list
+        selected_items = self.sub_subcategory_list.selectedItems()
+
+        if selected_items:
+            chosen_item = selected_items[0]
+
+            folder_path = chosen_item.data(100)
+            
+
+
+            # clear out any old text each time this is called
+            self.asset_folder_contents_list.clear()
+
+            folder_path = Path(folder_path)
+            geometry_files = []
+
+            # walks the asset folder file and looks for the jpg thumbnail and the geo files and adds them to a list each
+            for file in folder_path.rglob('*'):
+                if file.is_file():
+                    # check file extension
+                    ext = file.suffix.lower()
+
+                    if ext == ".jpg":
+                        # send the jpg's directory to the self.thumbnail_dir variable
+                        self.thumbnail_dir = str(file)
+                        # create a pixmap of the found jpg and update preview_thumbnail to display it
+                        pixmap = QPixmap(Path(self.thumbnail_dir))
+                        self.preview_thumbnail.setPixmap(pixmap)
+                        print(self.thumbnail_dir)
+                    
+                    elif ext in (".obj", ".fbx"):
+                        geometry_files.append(file)
+                        # remove the directory and only keep the name of the file
+                        item = QListWidgetItem(file.name)
+
+                        # put the full directory and name, combined, into slot 100
+                        # this isn't visible to the user but the code reads it when clicked
+                        # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                        item.setData(100, file)
+
+                        self.asset_folder_contents_list.addItem(item)
+                        
+
+
+
     def open_directory(self):
         directory = self.directory_line.text()
         os.startfile(directory)
 
 
 
-subfolder1_contents = ["Hero", "Character", "Environment", "Vegetation", "Utility"]
-
 if __name__ == "__main__":
     required_checks()
+    #startup()
     app = QApplication(sys.argv)
     window = AssetLibraryApp()
     window.show()
