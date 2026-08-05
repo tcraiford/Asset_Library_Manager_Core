@@ -1,8 +1,12 @@
-import shutil
 import os
 import subprocess
 import sys
 import configparser
+
+from maya_client import MayaClient
+from requiredChecks import check_required_libraries
+check_required_libraries()
+
 
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, QVBoxLayout, QPushButton,
                                QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
@@ -11,7 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from pathlib import Path
 
-# check if all necessary packages are installed and if not, offer to install them
+'''# check if all necessary packages are installed and if not, offer to install them
 def required_checks():
     required = ["PySide6", "pathlib"]
     missing = []
@@ -30,17 +34,9 @@ def required_checks():
             subprocess.run([sys.executable, __file__])
             sys.exit()
         else:
-            sys.exit("Exiting program. Please install the missing libraries and try again.")
+            sys.exit("Exiting program. Please install the missing libraries and try again.")'''
 
-'''# setup checks
-def startup():
-    # initialize the config parser
-    config = configparser.ConfigParser()
-    # read the settings.ini file
-    config.read("settings.ini")
-    library_path_string = config["LibraryDirectory"]["library_dir"]
-    print(f"Library directory is {library_path_string}")
-    return(library_path_string)'''
+
 
 # creates a basic starting library to be built upon. This is a starting point for the asset library
 def create_starting_library(base_directory_path):
@@ -73,6 +69,52 @@ def get_folders_in_directory(dir_path):
     dir_path = Path(dir_path)
     folders =  [f for f in dir_path.iterdir() if f.is_dir()]
     return folders
+
+# create the asset submission window that pops up when the user clicks "Submit New Asset"
+class AssetSubmissionDialog(QDialog):
+    # accepts the target path as an argument so it can be used to create the new asset folder in the correct location
+    def __init__(self, target_path: Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Submit New Asset")
+
+        self.new_asset_dir = target_path
+
+        confirmation_buttons = QHBoxLayout()
+        submit_button = QPushButton("Submit")
+        submit_button.clicked.connect(self.submit_asset)
+        confirmation_buttons.addWidget(submit_button)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.cancel_submission)
+        confirmation_buttons.addWidget(cancel_button)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Target Directory: {self.new_asset_dir}"))
+        self.new_asset_name_submission = QLineEdit(placeholderText="Enter new asset name here...")
+        layout.addWidget(self.new_asset_name_submission)
+        layout.addLayout(confirmation_buttons)
+
+    def verify_asset_doesnt_exist(self, new_asset_name):
+        new_folder_path = self.new_asset_dir / new_asset_name
+        if new_folder_path.exists():
+            QMessageBox.warning(self, "Asset Already Exists", "An asset with the same name already exists. Please choose a different name.")
+            return False
+        return True
+
+    def cancel_submission(self):
+        self.reject()
+
+    def submit_asset(self):
+        new_asset_name = self.new_asset_dir / self.new_asset_name_submission.text()
+
+        if new_asset_name.exists():
+            QMessageBox.warning(self, "Asset Already Exists", "An asset with the same name already exists. Please choose a different name.")
+            return
+        new_asset_name = new_asset_name / "ARCHIVE"
+        new_asset_name.mkdir(parents=True, exist_ok=False)
+
+        # closes the dialog box after submission and returns a True flag to the main window that the submission was successful
+        self.accept()
+
 
 # create a passwrod dialog box that can pop up when protected actions are attempted by user
 class PasswordDialog(QDialog):
@@ -114,10 +156,18 @@ class AssetLibraryApp(QMainWindow):
         self.setWindowTitle("Asset Library Manager")
         self.resize(500, 600)
         self.current_directory = ""
+
+        # the directory where a new asset would be created. Assigned in the subcategory_list selection method
+        self.new_asset_directory = ""
+
         # the list of geometry files found inside sub_subcategory_list
         self.geometry_file_list = []
         # directory of the thumbnail for the selected asset in sub_subcategory_list
         self.thumbnail_dir = ""
+
+        # Instantiate the MayaClient to manage communication with Maya
+        # this creates an object called self.maya that can be used to send commands to Maya. It is an instance of the MayaClient class defined in maya_client.py
+        self.maya = MayaClient()
 
         # password protection for some actions
         self.HARDCODED_PASSWORD = "0000"
@@ -152,6 +202,18 @@ class AssetLibraryApp(QMainWindow):
         self.preview_thumbnail.setFixedSize(256, 256)
         asset_options_layout.addWidget(self.preview_thumbnail)
 
+        # Control button layout
+        control_button_layout = QHBoxLayout()
+        connect_to_maya_button = QPushButton("Connect to Maya")
+        control_button_layout.addWidget(connect_to_maya_button)
+        connect_to_maya_button.clicked.connect(self.test_test)
+        submit_new_asset_button = QPushButton("Submit New Asset")
+        control_button_layout.addWidget(submit_new_asset_button)
+        submit_new_asset_button.clicked.connect(self.submit_new_asset)
+        open_asset_in_maya_button = QPushButton("Open Asset in Maya")
+        control_button_layout.addWidget(open_asset_in_maya_button)
+        #open_asset_in_maya_button.clicked.connect(self.open_asset_in_maya)
+
 
         self.directory_line = QLineEdit()
         self.directory_line.setPlaceholderText("Enter the base directory path here...")
@@ -165,8 +227,6 @@ class AssetLibraryApp(QMainWindow):
         self.set_base_directory()
         open_dir_button = QPushButton("Open Library")
         open_dir_button.clicked.connect(self.open_directory)
-        #create_library_button = QPushButton("Create Starting Library")
-        #create_library_button.clicked.connect(self.create_starting_library)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -185,6 +245,7 @@ class AssetLibraryApp(QMainWindow):
         # define the positioning of content on the main_layout tool
         main_layout.addWidget(description)
         main_layout.addLayout(dir_layout)
+        main_layout.addLayout(control_button_layout)
         main_layout.addLayout(list_layout)
         main_layout.addLayout(asset_options_layout)
 
@@ -202,6 +263,38 @@ class AssetLibraryApp(QMainWindow):
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
         self.position_gear_button()
+
+
+
+    def test_test(self):
+
+        # create a message box to tell user to set up connection on Maya side
+        msg_box = QMessageBox()
+        msg_box.setWindowTitle("Maya Connection Setup")
+        msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
+        msg_box.setIcon(QMessageBox.Icon.Information)
+
+        continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+        msg_box.addButton(QMessageBox.StandardButton.Cancel)
+        msg_box.exec()
+
+        if msg_box.clickedButton() == continue_button:
+            print("Testing connection...")
+            self.maya.test_maya_connection()
+        else:
+            print("User canceled the operation.")
+            return
+
+
+    def submit_new_asset(self):
+        print("Submit New Asset button clicked.")
+        if self.new_asset_directory == "":
+            QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
+            return
+        submission_dialog = AssetSubmissionDialog(self.new_asset_directory, self)
+        submission_dialog.exec()
+
+
     
     def position_gear_button(self):
         # calculate the x position of the button (window width - button width - margin)
@@ -328,6 +421,10 @@ class AssetLibraryApp(QMainWindow):
             # runs the populate_list method and feeds it the file path for the selection we just established and also tells the populate list method we want to send that data to the sub_subcategory_list)
             self.populate_list(next_folder_path, self.sub_subcategory_list)
 
+            # assign the selected subcategory folder's path to a self variable so it can be used to locate where a potential new asset will be created
+            #
+            self.new_asset_directory = chosen_item.data(100)
+
 
     def load_asset_folder_contents(self):
         # wipe the contents of asset_folder_contents_list
@@ -351,6 +448,8 @@ class AssetLibraryApp(QMainWindow):
 
             folder_path = Path(folder_path)
             geometry_files = []
+            # set jpg_item to false and then, if a jpg is found, it will be set to true. If it is still false after the loop, then we know no jpg was found and we can use a default thumbnail instead
+            jpg_item = False
 
             # walks the asset folder file and looks for the jpg thumbnail and the geo files and adds them to a list each
             for file in folder_path.rglob('*'):
@@ -358,13 +457,14 @@ class AssetLibraryApp(QMainWindow):
                     # check file extension
                     ext = file.suffix.lower()
 
+
                     if ext == ".jpg":
                         # send the jpg's directory to the self.thumbnail_dir variable
                         self.thumbnail_dir = str(file)
                         # create a pixmap of the found jpg and update preview_thumbnail to display it
                         pixmap = QPixmap(Path(self.thumbnail_dir))
                         self.preview_thumbnail.setPixmap(pixmap)
-                        print(self.thumbnail_dir)
+                        jpg_item = True
                     
                     elif ext in (".obj", ".fbx"):
                         geometry_files.append(file)
@@ -377,6 +477,14 @@ class AssetLibraryApp(QMainWindow):
                         item.setData(100, file)
 
                         self.asset_folder_contents_list.addItem(item)
+
+            # use missing thumbnail if no jpg was found in the asset folder
+            if jpg_item is not True:
+                # get the root directory of the script to use as a fallback thumbnail if no jpg is found
+                root_dir = Path(__file__).resolve().parent
+                root_dir = root_dir / "thumbnail_Missing.jpg"
+                pixmap = QPixmap(root_dir)
+                self.preview_thumbnail.setPixmap(pixmap)
                         
 
 
@@ -388,7 +496,6 @@ class AssetLibraryApp(QMainWindow):
 
 
 if __name__ == "__main__":
-    required_checks()
     #startup()
     app = QApplication(sys.argv)
     window = AssetLibraryApp()
