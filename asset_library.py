@@ -1,5 +1,5 @@
 import os
-import subprocess
+import shutil
 import sys
 import configparser
 
@@ -14,27 +14,6 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from pathlib import Path
-
-'''# check if all necessary packages are installed and if not, offer to install them
-def required_checks():
-    required = ["PySide6", "pathlib"]
-    missing = []
-    for package in required:
-        try:
-            globals()[package] = __import__(package)
-        except:
-            missing.append(package)
-    if missing:
-        print(f"Missing libraries: {', '.join(missing)}")
-        install_query = input("Do you want to install them now? (y/n): ").strip().lower()
-        if install_query == 'y':
-            for package in missing:
-                subprocess.run(["pip", "install", package])
-            print("Installation complete. Relaunching now...")
-            subprocess.run([sys.executable, __file__])
-            sys.exit()
-        else:
-            sys.exit("Exiting program. Please install the missing libraries and try again.")'''
 
 
 
@@ -59,11 +38,6 @@ def create_starting_library(base_directory_path):
     
     return base_directory_path
 
-# input validation
-def input_validation(answer, valid_options):
-    while answer not in valid_options:
-        answer = input("Invalid input. Please enter a valid option: ")
-
 
 def get_folders_in_directory(dir_path):
     dir_path = Path(dir_path)
@@ -76,6 +50,7 @@ class AssetSubmissionDialog(QDialog):
     def __init__(self, target_path: Path, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Submit New Asset")
+        self.maya = MayaClient()
 
         self.new_asset_dir = target_path
 
@@ -93,18 +68,19 @@ class AssetSubmissionDialog(QDialog):
         layout.addWidget(self.new_asset_name_submission)
         layout.addLayout(confirmation_buttons)
 
-    def verify_asset_doesnt_exist(self, new_asset_name):
-        new_folder_path = self.new_asset_dir / new_asset_name
-        if new_folder_path.exists():
-            QMessageBox.warning(self, "Asset Already Exists", "An asset with the same name already exists. Please choose a different name.")
-            return False
-        return True
 
     def cancel_submission(self):
         self.reject()
 
     def submit_asset(self):
         new_asset_name = self.new_asset_dir / self.new_asset_name_submission.text()
+
+        # determine if anything is selected
+        something_selected = self.maya.send_command(self.maya.determine_if_selected())
+        if something_selected == "False":
+            QMessageBox.warning(self, "No Selection", "Nothing selected in Maya. Please make a selection and try again.")
+            self.close()
+            return
 
         if new_asset_name.exists():
             QMessageBox.warning(self, "Asset Already Exists", "An asset with the same name already exists. Please choose a different name.")
@@ -168,6 +144,8 @@ class AssetLibraryApp(QMainWindow):
         # Instantiate the MayaClient to manage communication with Maya
         # this creates an object called self.maya that can be used to send commands to Maya. It is an instance of the MayaClient class defined in maya_client.py
         self.maya = MayaClient()
+        # Flag to track connection status with Maya
+        self.connected_to_maya = False  
 
         # password protection for some actions
         self.HARDCODED_PASSWORD = "0000"
@@ -206,7 +184,7 @@ class AssetLibraryApp(QMainWindow):
         control_button_layout = QHBoxLayout()
         connect_to_maya_button = QPushButton("Connect to Maya")
         control_button_layout.addWidget(connect_to_maya_button)
-        connect_to_maya_button.clicked.connect(self.test_test)
+        connect_to_maya_button.clicked.connect(self.set_up_maya_connection)
         submit_new_asset_button = QPushButton("Submit New Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
@@ -266,33 +244,81 @@ class AssetLibraryApp(QMainWindow):
 
 
 
-    def test_test(self):
-
-        # create a message box to tell user to set up connection on Maya side
-        msg_box = QMessageBox()
-        msg_box.setWindowTitle("Maya Connection Setup")
-        msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
-        msg_box.setIcon(QMessageBox.Icon.Information)
-
-        continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
-        msg_box.addButton(QMessageBox.StandardButton.Cancel)
-        msg_box.exec()
-
-        if msg_box.clickedButton() == continue_button:
-            print("Testing connection...")
+    def set_up_maya_connection(self):
+        # check if already connected to Maya. If so, do a fresh test of the connection and if it is still good, 
+        # tell the user they are already connected. If not, go through the connection process again.
+        if self.connected_to_maya:
             self.maya.test_maya_connection()
+            if self.maya.test_maya_connection():
+                
+                QMessageBox.information(self, "Maya Connection", "Already connected to Maya.")
+                return
         else:
-            print("User canceled the operation.")
-            return
+            # create a message box to tell user to set up connection on Maya side
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("Maya Connection Setup")
+            msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
+            msg_box.setIcon(QMessageBox.Icon.Information)
+
+            continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+            msg_box.addButton(QMessageBox.StandardButton.Cancel)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == continue_button:
+                print("Testing connection...")
+                self.maya.test_maya_connection()
+            else:
+                print("User canceled the operation.")
+                return
+
+            if self.maya.test_maya_connection():
+                self.connected_to_maya = True
 
 
     def submit_new_asset(self):
+        if not self.connected_to_maya:
+            self.set_up_maya_connection()
         print("Submit New Asset button clicked.")
         if self.new_asset_directory == "":
             QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
             return
+
+        # opens the dialog to create the new asset name and folder
         submission_dialog = AssetSubmissionDialog(self.new_asset_directory, self)
-        submission_dialog.exec()
+        result = submission_dialog.exec()
+
+        if not result:
+            return
+
+        # zoom extents of selection in Maya
+        self.maya.send_command("cmds.viewFit()")
+
+        # sends the export_selected_objects command to maya with the asset directory and adds the new asset name to the end of the path.
+        # This is done by taking the self.new_asset_directory and adding the new asset name from the submission_dialog to it.
+        # The result is a full path to where the new asset will be created in Maya.
+        asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
+        self.maya.send_command(self.maya.export_selected_objects(self.new_asset_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
+
+        # get the project directory for Maya where the thumbnail will be rendered to
+        maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
+
+        # temporarily create ambient light
+        self.maya.send_command(self.maya.create_ambient_light())
+
+        # render the thumbnail
+        self.maya.send_command(self.maya.render_thumbnail())
+
+        # delete the temp ambient light
+        self.maya.send_command(self.maya.delete_ambient_light())
+
+        # move the rendered thumbnail from the Maya project directory to the new asset folder
+        thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / "untitled.jpg"
+        thumbnail_destination = self.new_asset_directory / submission_dialog.new_asset_name_submission.text()
+        target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
+        shutil.move(thumbnail_source, target_thumbnail_path)
+
+        # refresh the sub_subcategory_list to show the new asset folder
+        self.load_sub_subcategories()
 
 
     
