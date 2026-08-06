@@ -82,14 +82,66 @@ class AssetSubmissionDialog(QDialog):
             self.close()
             return
 
-        if new_asset_name.exists():
-            QMessageBox.warning(self, "Asset Already Exists", "An asset with the same name already exists. Please choose a different name.")
-            return
-        new_asset_name = new_asset_name / "ARCHIVE"
-        new_asset_name.mkdir(parents=True, exist_ok=False)
+
+        # add /ARCHIVE directory and create folder directory
+        # this is called before checking if it already exists because it will work whether or not the folder exists already and we
+        # need that folder to exist for archival purposees too
+        new_asset_archive_folder = new_asset_name / "ARCHIVE"
+        new_asset_archive_folder.mkdir(parents=True, exist_ok=True)
+
+ 
+        # checks for pre-existing file and prompts archival
+        # new_asset_name is the file's directory but we need to add the actual file's name and type to the end of the path so we specifically target the file within the folder with the matching name
+        existing_file_name = self.new_asset_name_submission.text() + ".fbx"
+        existing_asset_source = new_asset_name / existing_file_name
+
+        if existing_asset_source.exists():
+            response_to_archival = self.prompt_archival()
+
+            if response_to_archival:
+                # logic to increment the file number in ARCHIVE to prevent overwriting previous Archive files
+                counter = 1
+                archived_file_name = f"ARCHIVE_{existing_file_name.replace('.fbx', '')}_{counter:03d}.fbx"
+
+                existing_asset_destination = new_asset_archive_folder / archived_file_name
+
+                # checks if the Archive file version exists and if so, increments by 1 and tries again
+                while existing_asset_destination.exists():
+                    counter += 1
+                    archived_file_name = f"ARCHIVE_{existing_file_name.replace('.fbx', '')}_{counter:03d}.fbx"
+                    existing_asset_destination = new_asset_archive_folder / archived_file_name
+
+                shutil.move(existing_asset_source, existing_asset_destination)
+
+
+            else:
+                # cancel asset submission if user does not want to archive an existing file
+                QMessageBox.warning(self, "Choose a New Name", "Please choose a different name for the asset submission and try again.")
+                return
+
+        
 
         # closes the dialog box after submission and returns a True flag to the main window that the submission was successful
         self.accept()
+
+    def prompt_archival(self):
+        # if asset name already exists, this will prompt if they want to Archive the existing version and submit a new version
+        archive_prompt_box = QMessageBox(self)
+
+        archive_prompt_box.setIcon(QMessageBox.Icon.Question)
+        archive_prompt_box.setWindowTitle("Archive Existing?")
+        archive_prompt_box.setText("Asset already exists. Do you want to archive the existing file and create a new version?")
+
+        # create the buttons
+        archive_prompt_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        # default highlight button no to avoid accidental archival
+        archive_prompt_box.setDefaultButton(QMessageBox.StandardButton.No)
+
+        response = archive_prompt_box.exec()
+
+        # response is either QMessageBox.StandardButton.Yes or No. If it is Yes, then this will evaluate as True, thus prompt_archival() returns True if user selects Yes button
+        return response == QMessageBox.StandardButton.Yes
+
 
 
 # create a passwrod dialog box that can pop up when protected actions are attempted by user
@@ -134,7 +186,10 @@ class AssetLibraryApp(QMainWindow):
         self.current_directory = ""
 
         # the directory where a new asset would be created. Assigned in the subcategory_list selection method
-        self.new_asset_directory = ""
+        self.new_asset_submission_directory = ""
+
+        # selected asset in asset list
+        self.asset_list_selection = ""
 
         # the list of geometry files found inside sub_subcategory_list
         self.geometry_file_list = []
@@ -163,6 +218,8 @@ class AssetLibraryApp(QMainWindow):
         self.subcategory_list.itemSelectionChanged.connect(self.load_sub_subcategories)
         # when a user selects an asset folder in the sub_subcategory list, walk and load the contents of that asset folder
         self.sub_subcategory_list.itemSelectionChanged.connect(self.load_asset_folder_contents)
+        # when a user selects an asset listed in the asset's folder
+        self.asset_folder_contents_list.itemClicked.connect(self.get_selected_asset_path)
 
         # category list layout
         list_layout = QHBoxLayout()
@@ -182,15 +239,12 @@ class AssetLibraryApp(QMainWindow):
 
         # Control button layout
         control_button_layout = QHBoxLayout()
-        connect_to_maya_button = QPushButton("Connect to Maya")
-        control_button_layout.addWidget(connect_to_maya_button)
-        connect_to_maya_button.clicked.connect(self.set_up_maya_connection)
         submit_new_asset_button = QPushButton("Submit New Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
         open_asset_in_maya_button = QPushButton("Open Asset in Maya")
         control_button_layout.addWidget(open_asset_in_maya_button)
-        #open_asset_in_maya_button.clicked.connect(self.open_asset_in_maya)
+        open_asset_in_maya_button.clicked.connect(self.open_asset_in_maya)
 
 
         self.directory_line = QLineEdit()
@@ -235,6 +289,7 @@ class AssetLibraryApp(QMainWindow):
         #dropdown menu options
         gear_menu = QMenu(self)
         # add gear_menu functions here. Format is string for displayed menu option and then the function
+        gear_menu.addAction("Connect to Maya", self.set_up_maya_connection)
         gear_menu.addAction("Create Starting Library", self.create_starting_library)
         gear_menu.addAction("Change Library Directory", self.change_directory)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
@@ -247,13 +302,8 @@ class AssetLibraryApp(QMainWindow):
     def set_up_maya_connection(self):
         # check if already connected to Maya. If so, do a fresh test of the connection and if it is still good, 
         # tell the user they are already connected. If not, go through the connection process again.
-        if self.connected_to_maya:
-            self.maya.test_maya_connection()
-            if self.maya.test_maya_connection():
-                
-                QMessageBox.information(self, "Maya Connection", "Already connected to Maya.")
-                return
-        else:
+        if not self.connected_to_maya:
+            
             # create a message box to tell user to set up connection on Maya side
             msg_box = QMessageBox()
             msg_box.setWindowTitle("Maya Connection Setup")
@@ -275,16 +325,26 @@ class AssetLibraryApp(QMainWindow):
                 self.connected_to_maya = True
 
 
+    def open_asset_in_maya(self):
+        if not self.connected_to_maya:
+            self.set_up_maya_connection()
+
+        file_path = self.get_selected_asset_path()
+        print(file_path)
+
+        self.maya.send_command(self.maya.reference_file(file_path))
+        
+
     def submit_new_asset(self):
         if not self.connected_to_maya:
             self.set_up_maya_connection()
-        print("Submit New Asset button clicked.")
-        if self.new_asset_directory == "":
+
+        if self.new_asset_submission_directory == "":
             QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
             return
 
         # opens the dialog to create the new asset name and folder
-        submission_dialog = AssetSubmissionDialog(self.new_asset_directory, self)
+        submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
         result = submission_dialog.exec()
 
         if not result:
@@ -294,10 +354,10 @@ class AssetLibraryApp(QMainWindow):
         self.maya.send_command("cmds.viewFit()")
 
         # sends the export_selected_objects command to maya with the asset directory and adds the new asset name to the end of the path.
-        # This is done by taking the self.new_asset_directory and adding the new asset name from the submission_dialog to it.
+        # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
         # The result is a full path to where the new asset will be created in Maya.
         asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-        self.maya.send_command(self.maya.export_selected_objects(self.new_asset_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
+        self.maya.send_command(self.maya.export_selected_objects(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
 
         # get the project directory for Maya where the thumbnail will be rendered to
         maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
@@ -313,7 +373,7 @@ class AssetLibraryApp(QMainWindow):
 
         # move the rendered thumbnail from the Maya project directory to the new asset folder
         thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / "untitled.jpg"
-        thumbnail_destination = self.new_asset_directory / submission_dialog.new_asset_name_submission.text()
+        thumbnail_destination = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
         target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
         shutil.move(thumbnail_source, target_thumbnail_path)
 
@@ -448,8 +508,7 @@ class AssetLibraryApp(QMainWindow):
             self.populate_list(next_folder_path, self.sub_subcategory_list)
 
             # assign the selected subcategory folder's path to a self variable so it can be used to locate where a potential new asset will be created
-            #
-            self.new_asset_directory = chosen_item.data(100)
+            self.new_asset_submission_directory = chosen_item.data(100)
 
 
     def load_asset_folder_contents(self):
@@ -466,9 +525,9 @@ class AssetLibraryApp(QMainWindow):
             chosen_item = selected_items[0]
 
             folder_path = chosen_item.data(100)
+            # added this line to test
+            self.asset_list_selection = chosen_item.data(100)
             
-
-
             # clear out any old text each time this is called
             self.asset_folder_contents_list.clear()
 
@@ -511,7 +570,20 @@ class AssetLibraryApp(QMainWindow):
                 root_dir = root_dir / "thumbnail_Missing.jpg"
                 pixmap = QPixmap(root_dir)
                 self.preview_thumbnail.setPixmap(pixmap)
-                        
+
+
+    def get_selected_asset_path(self):
+        selected_items = self.asset_folder_contents_list.selectedItems()
+
+        if not selected_items:
+            return
+
+        chosen_item = selected_items[0]
+        file_path = chosen_item.data(100)
+        return file_path
+
+
+
 
 
 

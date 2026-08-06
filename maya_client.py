@@ -8,8 +8,9 @@ class MayaClient:
         self.host = host
         self.port = port
 
-    def class_test(self, i_take_input):
-        print(f"MayaClient class is working correctly. Input received: {i_take_input}")
+
+        
+        
 
     def test_maya_connection(self) -> bool:
         """Briefly opens a socket to check if Maya's port is listening."""
@@ -77,4 +78,14 @@ class MayaClient:
     def determine_if_selected(self):
         # determines if anything is selected
         cmd = 'bool(cmds.ls(selection=True))'
+        return cmd
+
+    def reference_file(self, file_dir: str) -> str:
+        if file_dir is None:
+            return
+        # changes the file path to a string with forward slashes so that Maya can read it correctly
+        file_dir = Path(file_dir)
+        clean_namespace = file_dir.stem
+        clean_path = file_dir.as_posix()
+        cmd = f'cmds.file("{clean_path}", reference = True, namespace = "{clean_namespace}")'
         return cmd
