@@ -87,7 +87,9 @@ class AssetSubmissionDialog(QDialog):
         # this is called before checking if it already exists because it will work whether or not the folder exists already and we
         # need that folder to exist for archival purposees too
         new_asset_archive_folder = new_asset_name / "ARCHIVE"
+        new_asset_textures_folder = new_asset_name / "TEXTURES"
         new_asset_archive_folder.mkdir(parents=True, exist_ok=True)
+        new_asset_textures_folder.mkdir(parents=True, exist_ok=True)
 
  
         # checks for pre-existing file and prompts archival
@@ -353,11 +355,12 @@ class AssetLibraryApp(QMainWindow):
         # zoom extents of selection in Maya
         self.maya.send_command("cmds.viewFit()")
 
-        # sends the export_selected_objects command to maya with the asset directory and adds the new asset name to the end of the path.
+        # sends the export_selected_to_fbx command to maya with the asset directory and adds the new asset name to the end of the path.
         # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
         # The result is a full path to where the new asset will be created in Maya.
         asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-        self.maya.send_command(self.maya.export_selected_objects(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
+        self.maya.send_command(self.maya.export_selected_to_fbx(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
+        self.maya.send_command(self.maya.export_selected_to_ma(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
 
         # get the project directory for Maya where the thumbnail will be rendered to
         maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
@@ -372,7 +375,12 @@ class AssetLibraryApp(QMainWindow):
         self.maya.send_command(self.maya.delete_ambient_light())
 
         # move the rendered thumbnail from the Maya project directory to the new asset folder
-        thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / "untitled.jpg"
+        # first get the open maya file name because that is what the image will be named
+        maya_file_name = Path(self.maya.send_command(self.maya.get_file_name())).stem
+        if maya_file_name == "": # if the project is unsaved, the get_file_name() method returns nothing and the render will be saved as "untitled"
+            maya_file_name = "untitled"
+        maya_file_name = f"{maya_file_name}.jpg"
+        thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / maya_file_name
         thumbnail_destination = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
         target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
         shutil.move(thumbnail_source, target_thumbnail_path)
@@ -551,7 +559,7 @@ class AssetLibraryApp(QMainWindow):
                         self.preview_thumbnail.setPixmap(pixmap)
                         jpg_item = True
                     
-                    elif ext in (".obj", ".fbx"):
+                    elif ext in (".obj", ".fbx", ".ma", ".mb", ".max"):
                         geometry_files.append(file)
                         # remove the directory and only keep the name of the file
                         item = QListWidgetItem(file.name)
@@ -581,10 +589,6 @@ class AssetLibraryApp(QMainWindow):
         chosen_item = selected_items[0]
         file_path = chosen_item.data(100)
         return file_path
-
-
-
-
 
 
     def open_directory(self):

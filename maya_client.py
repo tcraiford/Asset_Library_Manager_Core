@@ -9,8 +9,6 @@ class MayaClient:
         self.port = port
 
 
-        
-        
 
     def test_maya_connection(self) -> bool:
         """Briefly opens a socket to check if Maya's port is listening."""
@@ -32,6 +30,7 @@ class MayaClient:
         """Sends a Python string command to Maya and returns the string response."""
         try:
             with socket.create_connection((self.host, self.port), timeout=2.0) as client:
+                client.settimeout(30) # allows a half min length of time for a file export but will fail if it takes longer
                 # Maya expects commands terminated by a newline
                 client.sendall(f"{command}\n".encode("utf-8"))
                 
@@ -43,15 +42,21 @@ class MayaClient:
                 print(response)
                 return response.strip()
         except Exception as e:
-            raise ConnectionError(f"Failed to communicate with Maya: {e}")
+            raise ConnectionError(f"Maya communication timed out: {e}")
 
 
-    def export_selected_objects(self, file_path: str) -> str:
+    def export_selected_to_fbx(self, file_path: str) -> str:
         # changes the file path to a string with forward slashes so that Maya can read it correctly
         clean_path = Path(file_path).as_posix()
 
         # exports selected objects in Maya to the specified file path
         cmd = f'cmds.file("{clean_path}", force=True, type="FBX export", exportSelected=True)'
+        return cmd
+
+    def export_selected_to_ma(self, file_path: str) -> str:
+        clean_path = Path(file_path).as_posix()
+
+        cmd = f'cmds.file("{clean_path}", force=True, type="mayaAscii", exportSelected=True)'
         return cmd
 
     # render out the thumbnail
@@ -88,4 +93,9 @@ class MayaClient:
         clean_namespace = file_dir.stem
         clean_path = file_dir.as_posix()
         cmd = f'cmds.file("{clean_path}", reference = True, namespace = "{clean_namespace}")'
+        return cmd
+
+    def get_file_name(self):
+        # returns the file name of the maya file that is open
+        cmd = 'cmds.file(q=True, sn=True)'
         return cmd
