@@ -1,5 +1,6 @@
 from pathlib import Path
 import socket
+import base64
 
 
 class MayaClient:
@@ -39,7 +40,7 @@ class MayaClient:
                 # remove any trailing null bytes from Maya's response
                 response = response.replace("\x00", "")
                 #print the response from Maya to the console for debugging purposes 
-                print(response)
+                #print(response)
                 return response.strip()
         except Exception as e:
             raise ConnectionError(f"Maya communication timed out: {e}")
@@ -75,6 +76,19 @@ class MayaClient:
         cmd = "selection = cmds.ls(selection=True); print(selection); cmds.ambientLight(intensity=10, name='L_Render'); cmds.select('L_Render'); cmds.move(0, 100, 0); cmds.select(selection)"
         return cmd
 
+    '''def create_ambient_light(self) -> str:
+        cmd = ("selection = cmds.ls(selection=True)\n"
+               "if selection[1]:\n"
+               "    cmds.ambientLight(intensity=10000, name='L_Render')\n"
+               "else:\n"
+               "    cmds.ambientLight(intensity=1, name='L_Render')\n"
+                "cmds.select('L_Render')\n"
+                "cmds.move(0, 100, 0)\n"
+                "cmds.select(selection)\n"
+        )
+        
+        return cmd'''
+
     def delete_ambient_light(self) -> str:
         # delete the ambient light
         cmd = "cmds.delete('L_Render')"
@@ -99,3 +113,11 @@ class MayaClient:
         # returns the file name of the maya file that is open
         cmd = 'cmds.file(q=True, sn=True)'
         return cmd
+
+    def get_selection_materials(self):
+        # get a list of materials connected to selection named materials
+        cmd = 'selection = cmds.ls(sl=True); shading_groups = cmds.listConnections(selection, type="shadingEngine"); ' \
+        'shading_groups = list(set(shading_groups)); materials=cmds.ls(cmds.listConnections(shading_groups), materials=True); ' \
+        'materials = list(set(materials))'
+        return cmd
+

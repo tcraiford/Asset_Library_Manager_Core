@@ -352,6 +352,10 @@ class AssetLibraryApp(QMainWindow):
         if not result:
             return
 
+
+        # get the materials attached to the selection
+        self.maya.send_command(self.maya.get_selection_materials())
+
         # zoom extents of selection in Maya
         self.maya.send_command("cmds.viewFit()")
 
