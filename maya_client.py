@@ -103,7 +103,6 @@ class MayaClient:
         return cmd
 
     def collect_textures(self, new_asset_dir):
-        print(f'sending instructions to collect textures from {new_asset_dir}')
         new_asset_dir= str(Path(new_asset_dir).as_posix())
         cmd= f"import importlib; import maya_scripts; importlib.reload(maya_scripts); assetToolScript = maya_scripts.assetLibraryTools(); assetToolScript.collect_textures('{new_asset_dir}')"
         return cmd

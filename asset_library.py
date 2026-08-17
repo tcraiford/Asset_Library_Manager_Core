@@ -405,7 +405,6 @@ class AssetLibraryApp(QMainWindow):
         asset_directory_name = asset_directory / asset_name
         self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name))
         self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name))
-        print("model exported. Moving to materials now...")
 
         # remove any old textures and collect textures for model
         #---------------------------------------------------
@@ -605,25 +604,30 @@ class AssetLibraryApp(QMainWindow):
 
             folder_path = Path(folder_path)
             geometry_files = []
-            # set jpg_item to false and then, if a jpg is found, it will be set to true. If it is still false after the loop, then we know no jpg was found and we can use a default thumbnail instead
-            jpg_item = False
 
-            # walks the asset folder file and looks for the jpg thumbnail and the geo files and adds them to a list each
+            
+
+            
+            self.thumbnail_dir = folder_path / "thumbnail.jpg"
+            if self.thumbnail_dir.exists():
+
+                pixmap = QPixmap(Path(self.thumbnail_dir))
+                self.preview_thumbnail.setPixmap(pixmap)
+
+            else:
+                root_dir = Path(__file__).resolve().parent
+                root_dir = root_dir / "thumbnail_Missing.jpg"
+                pixmap = QPixmap(root_dir)
+                self.preview_thumbnail.setPixmap(pixmap)
+
+
+            # walks the asset folder file and looks for  geo files and adds them to a list
             for file in folder_path.rglob('*'):
                 if file.is_file():
                     # check file extension
                     ext = file.suffix.lower()
-
-
-                    if ext == ".jpg":
-                        # send the jpg's directory to the self.thumbnail_dir variable
-                        self.thumbnail_dir = str(file)
-                        # create a pixmap of the found jpg and update preview_thumbnail to display it
-                        pixmap = QPixmap(Path(self.thumbnail_dir))
-                        self.preview_thumbnail.setPixmap(pixmap)
-                        jpg_item = True
                     
-                    elif ext in (".obj", ".fbx", ".ma", ".mb", ".max"):
+                    if ext in (".obj", ".fbx", ".ma", ".mb", ".max"):
                         geometry_files.append(file)
                         # remove the directory and only keep the name of the file
                         item = QListWidgetItem(file.name)
@@ -635,13 +639,6 @@ class AssetLibraryApp(QMainWindow):
 
                         self.asset_folder_contents_list.addItem(item)
 
-            # use missing thumbnail if no jpg was found in the asset folder
-            if jpg_item is not True:
-                # get the root directory of the script to use as a fallback thumbnail if no jpg is found
-                root_dir = Path(__file__).resolve().parent
-                root_dir = root_dir / "thumbnail_Missing.jpg"
-                pixmap = QPixmap(root_dir)
-                self.preview_thumbnail.setPixmap(pixmap)
 
 
     def get_selected_asset_path(self):
