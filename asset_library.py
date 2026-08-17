@@ -72,6 +72,7 @@ class AssetSubmissionDialog(QDialog):
     def cancel_submission(self):
         self.reject()
 
+    # creates the folders for the new asset submission and handles the archival process
     def submit_asset(self):
         new_asset_name = self.new_asset_dir / self.new_asset_name_submission.text()
 
@@ -83,7 +84,7 @@ class AssetSubmissionDialog(QDialog):
             return
 
 
-        # add /ARCHIVE directory and create folder directory
+        # add /ARCHIVE and /TEXTURES directory and create folder directory
         # this is called before checking if it already exists because it will work whether or not the folder exists already and we
         # need that folder to exist for archival purposees too
         new_asset_archive_folder = new_asset_name / "ARCHIVE"
@@ -241,6 +242,9 @@ class AssetLibraryApp(QMainWindow):
 
         # Control button layout
         control_button_layout = QHBoxLayout()
+        maya_test_button = QPushButton("Maya Function Test")
+        control_button_layout.addWidget(maya_test_button)
+        maya_test_button.clicked.connect(self.do_Maya_test)
         submit_new_asset_button = QPushButton("Submit New Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
@@ -299,6 +303,41 @@ class AssetLibraryApp(QMainWindow):
         # position the gear_button top right always
         self.position_gear_button()
 
+    # gets the default maya scripts folder directory
+    def get_maya_scripts_dir(self):
+        home = Path.home()
+
+        if os.name =='nt': # Windows
+            return home / "Documents" / "maya" / "scripts"
+
+        elif os.sys.platform == 'darwin':  # macOS
+            return home / "Library" / "Preferences" / "Autodesk" / "maya" / "scripts"
+        
+        else:  # Linux
+            return home / "maya" / "scripts"
+
+    # copies the maya_scripts file to the default maya script folder
+    def send_script_to_maya_default_folder(self):
+        # maya's default script directory
+            script_dir = self.get_maya_scripts_dir()
+            # what the file would be called if it already exists in the default directory
+            possible_script_dir = script_dir / "maya_scripts.py"
+            # directory of THIS file and all the extra bits
+            program_dir = Path(__file__).resolve().parent / "maya_scripts.py"
+    
+            # if the maya_scripts.py file isn't in the main scripts folder, put a copy there
+            if not possible_script_dir.is_file():
+                script_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(program_dir, script_dir)
+
+
+    def do_Maya_test(self):
+        print('maya function test button pressed')
+        self.send_script_to_maya_default_folder()
+        self.maya.send_command(self.maya.test_button())
+        
+
+
 
 
     def set_up_maya_connection(self):
@@ -352,19 +391,40 @@ class AssetLibraryApp(QMainWindow):
         if not result:
             return
 
-
-        # get the materials attached to the selection
-        self.maya.send_command(self.maya.get_selection_materials())
-
         # zoom extents of selection in Maya
         self.maya.send_command("cmds.viewFit()")
+
+        # send script folder to Maya default location for texture collection
+        self.send_script_to_maya_default_folder()
 
         # sends the export_selected_to_fbx command to maya with the asset directory and adds the new asset name to the end of the path.
         # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
         # The result is a full path to where the new asset will be created in Maya.
         asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-        self.maya.send_command(self.maya.export_selected_to_fbx(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
-        self.maya.send_command(self.maya.export_selected_to_ma(self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text() / asset_name))
+        asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
+        asset_directory_name = asset_directory / asset_name
+        self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name))
+        self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name))
+        print("model exported. Moving to materials now...")
+
+        # remove any old textures and collect textures for model
+        #---------------------------------------------------
+        textures_folder = asset_directory / "TEXTURES"
+        backup_folder = textures_folder / "BACKUP"
+
+        # delete backup_folder if it exists for the asset then create a new empty one
+        if backup_folder.exists():
+            shutil.rmtree(backup_folder)
+        backup_folder.mkdir(parents=True, exist_ok=True)
+
+        # copy all contents of TEXTURES folder that are not a directory into backup_folder
+        for item in textures_folder.iterdir():
+            if item == backup_folder:
+                continue
+            if not item.is_dir() and not item.is_symlink():
+                shutil.move(item, backup_folder)
+
+        self.maya.send_command(self.maya.collect_textures(textures_folder))
 
         # get the project directory for Maya where the thumbnail will be rendered to
         maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())

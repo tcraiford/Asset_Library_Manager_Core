@@ -1,6 +1,6 @@
 from pathlib import Path
 import socket
-import base64
+import shutil
 
 
 class MayaClient:
@@ -8,6 +8,7 @@ class MayaClient:
     def __init__(self, host: str = "127.0.0.1", port: int = 7002):
         self.host = host
         self.port = port
+        self.collect_file_path = ""
 
 
 
@@ -76,19 +77,6 @@ class MayaClient:
         cmd = "selection = cmds.ls(selection=True); print(selection); cmds.ambientLight(intensity=10, name='L_Render'); cmds.select('L_Render'); cmds.move(0, 100, 0); cmds.select(selection)"
         return cmd
 
-    '''def create_ambient_light(self) -> str:
-        cmd = ("selection = cmds.ls(selection=True)\n"
-               "if selection[1]:\n"
-               "    cmds.ambientLight(intensity=10000, name='L_Render')\n"
-               "else:\n"
-               "    cmds.ambientLight(intensity=1, name='L_Render')\n"
-                "cmds.select('L_Render')\n"
-                "cmds.move(0, 100, 0)\n"
-                "cmds.select(selection)\n"
-        )
-        
-        return cmd'''
-
     def delete_ambient_light(self) -> str:
         # delete the ambient light
         cmd = "cmds.delete('L_Render')"
@@ -114,10 +102,15 @@ class MayaClient:
         cmd = 'cmds.file(q=True, sn=True)'
         return cmd
 
-    def get_selection_materials(self):
-        # get a list of materials connected to selection named materials
-        cmd = 'selection = cmds.ls(sl=True); shading_groups = cmds.listConnections(selection, type="shadingEngine"); ' \
-        'shading_groups = list(set(shading_groups)); materials=cmds.ls(cmds.listConnections(shading_groups), materials=True); ' \
-        'materials = list(set(materials))'
+    def collect_textures(self, new_asset_dir):
+        print(f'sending instructions to collect textures from {new_asset_dir}')
+        new_asset_dir= str(Path(new_asset_dir).as_posix())
+        cmd= f"import importlib; import maya_scripts; importlib.reload(maya_scripts); assetToolScript = maya_scripts.assetLibraryTools(); assetToolScript.collect_textures('{new_asset_dir}')"
         return cmd
 
+    def test_button(self):
+        print('sending instructions to open maya_scripts')
+        cmd = f"import importlib; import maya_scripts; importlib.reload(maya_scripts); assetToolScript = maya_scripts.assetLibraryTools(); assetToolScript.make_cube()"
+        print('sent instructions')
+
+        return cmd
