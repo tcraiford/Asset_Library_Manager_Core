@@ -4,13 +4,14 @@ import sys
 import configparser
 
 from maya_client import MayaClient
+from max_client import MaxClient
 from requiredChecks import check_required_libraries
 check_required_libraries()
 
 
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, QVBoxLayout, QPushButton,
                                QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
-                               QMenu)
+                               QMenu, QComboBox)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from pathlib import Path
@@ -242,15 +243,18 @@ class AssetLibraryApp(QMainWindow):
 
         # Control button layout
         control_button_layout = QHBoxLayout()
-        maya_test_button = QPushButton("Maya Function Test")
-        control_button_layout.addWidget(maya_test_button)
-        maya_test_button.clicked.connect(self.do_Maya_test)
+        self.dcc_selection = QComboBox()
+        self.dcc_selection.addItems(['Maya', '3ds Max'])
+        control_button_layout.addWidget(self.dcc_selection)
+        test_button = QPushButton("Function Test")
+        control_button_layout.addWidget(test_button)
+        test_button.clicked.connect(self.do_function_test)
         submit_new_asset_button = QPushButton("Submit New Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
-        open_asset_in_maya_button = QPushButton("Open Asset in Maya")
-        control_button_layout.addWidget(open_asset_in_maya_button)
-        open_asset_in_maya_button.clicked.connect(self.open_asset_in_maya)
+        send_asset_to_scene_button = QPushButton("Send Asset to Scene")
+        control_button_layout.addWidget(send_asset_to_scene_button)
+        send_asset_to_scene_button.clicked.connect(self.open_asset_in_scene)
 
 
         self.directory_line = QLineEdit()
@@ -295,7 +299,7 @@ class AssetLibraryApp(QMainWindow):
         #dropdown menu options
         gear_menu = QMenu(self)
         # add gear_menu functions here. Format is string for displayed menu option and then the function
-        gear_menu.addAction("Connect to Maya", self.set_up_maya_connection)
+        gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
         gear_menu.addAction("Create Starting Library", self.create_starting_library)
         gear_menu.addAction("Change Library Directory", self.change_directory)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
@@ -331,126 +335,140 @@ class AssetLibraryApp(QMainWindow):
                 shutil.copy2(program_dir, script_dir)
 
 
-    def do_Maya_test(self):
-        print('maya function test button pressed')
-        self.send_script_to_maya_default_folder()
-        self.maya.send_command(self.maya.test_button())
+    def do_function_test(self):
+        if self.dcc_selection.currentText() == "Maya":
+            print('maya function test button pressed')
+            self.send_script_to_maya_default_folder()
+            self.maya.send_command(self.maya.test_button())
+
+        else:
+            print("to test a 3ds Max function, please complete the do_function_test method")
+
+
+    def set_up_dcc_connection(self):
+        if self.dcc_selection.currentText() == "Maya":
+            # check if already connected to Maya. If so, do a fresh test of the connection and if it is still good, 
+            # tell the user they are already connected. If not, go through the connection process again.
+            if not self.connected_to_maya:
+                
+                # create a message box to tell user to set up connection on Maya side
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Maya Connection Setup")
+                msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    print("Testing connection...")
+                    self.maya.test_maya_connection()
+                else:
+                    print("User canceled the operation.")
+                    return
+
+                if self.maya.test_maya_connection():
+                    self.connected_to_maya = True
+
+        else:
+            print("To connect to 3ds max, please complete the method set_up_dcc_connection")
+
+
+    def open_asset_in_scene(self):
+        if self.dcc_selection.currentText() == "Maya":
+            print("Opening asset in Maya")
         
+            if not self.connected_to_maya:
+                self.set_up_dcc_connection()
 
+            file_path = self.get_selected_asset_path()
+            print(file_path)
 
+            self.maya.send_command(self.maya.reference_file(file_path))
 
-
-    def set_up_maya_connection(self):
-        # check if already connected to Maya. If so, do a fresh test of the connection and if it is still good, 
-        # tell the user they are already connected. If not, go through the connection process again.
-        if not self.connected_to_maya:
-            
-            # create a message box to tell user to set up connection on Maya side
-            msg_box = QMessageBox()
-            msg_box.setWindowTitle("Maya Connection Setup")
-            msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
-            msg_box.setIcon(QMessageBox.Icon.Information)
-
-            continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
-            msg_box.addButton(QMessageBox.StandardButton.Cancel)
-            msg_box.exec()
-
-            if msg_box.clickedButton() == continue_button:
-                print("Testing connection...")
-                self.maya.test_maya_connection()
-            else:
-                print("User canceled the operation.")
-                return
-
-            if self.maya.test_maya_connection():
-                self.connected_to_maya = True
-
-
-    def open_asset_in_maya(self):
-        if not self.connected_to_maya:
-            self.set_up_maya_connection()
-
-        file_path = self.get_selected_asset_path()
-        print(file_path)
-
-        self.maya.send_command(self.maya.reference_file(file_path))
+        else:
+            print("Opening in 3ds Max")
         
 
     def submit_new_asset(self):
-        if not self.connected_to_maya:
-            self.set_up_maya_connection()
+        if self.dcc_selection.currentText() == "Maya":
+            if not self.connected_to_maya:
+                self.set_up_dcc_connection()
 
-        if self.new_asset_submission_directory == "":
-            QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
-            return
+            if self.new_asset_submission_directory == "":
+                QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
+                return
 
-        # opens the dialog to create the new asset name and folder
-        submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
-        result = submission_dialog.exec()
+            # opens the dialog to create the new asset name and folder
+            submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
+            result = submission_dialog.exec()
 
-        if not result:
-            return
+            if not result:
+                return
 
-        # zoom extents of selection in Maya
-        self.maya.send_command("cmds.viewFit()")
+            # zoom extents of selection in Maya
+            self.maya.send_command("cmds.viewFit()")
 
-        # send script folder to Maya default location for texture collection
-        self.send_script_to_maya_default_folder()
+            # send script folder to Maya default location for texture collection
+            self.send_script_to_maya_default_folder()
 
-        # sends the export_selected_to_fbx command to maya with the asset directory and adds the new asset name to the end of the path.
-        # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
-        # The result is a full path to where the new asset will be created in Maya.
-        asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-        asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
-        asset_directory_name = asset_directory / asset_name
-        self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name))
-        self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name))
+            # sends the export_selected_to_fbx command to maya with the asset directory and adds the new asset name to the end of the path.
+            # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
+            # The result is a full path to where the new asset will be created in Maya.
+            asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
+            asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
+            asset_directory_name = asset_directory / asset_name
+            self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name))
+            self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name))
 
-        # remove any old textures and collect textures for model
-        #---------------------------------------------------
-        textures_folder = asset_directory / "TEXTURES"
-        backup_folder = textures_folder / "BACKUP"
+            # remove any old textures and collect textures for model
+            #---------------------------------------------------
+            textures_folder = asset_directory / "TEXTURES"
+            backup_folder = textures_folder / "BACKUP"
 
-        # delete backup_folder if it exists for the asset then create a new empty one
-        if backup_folder.exists():
-            shutil.rmtree(backup_folder)
-        backup_folder.mkdir(parents=True, exist_ok=True)
+            # delete backup_folder if it exists for the asset then create a new empty one
+            if backup_folder.exists():
+                shutil.rmtree(backup_folder)
+            backup_folder.mkdir(parents=True, exist_ok=True)
 
-        # copy all contents of TEXTURES folder that are not a directory into backup_folder
-        for item in textures_folder.iterdir():
-            if item == backup_folder:
-                continue
-            if not item.is_dir() and not item.is_symlink():
-                shutil.move(item, backup_folder)
+            # copy all contents of TEXTURES folder that are not a directory into backup_folder
+            for item in textures_folder.iterdir():
+                if item == backup_folder:
+                    continue
+                if not item.is_dir() and not item.is_symlink():
+                    shutil.move(item, backup_folder)
 
-        self.maya.send_command(self.maya.collect_textures(textures_folder))
+            self.maya.send_command(self.maya.collect_textures(textures_folder))
 
-        # get the project directory for Maya where the thumbnail will be rendered to
-        maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
+            # get the project directory for Maya where the thumbnail will be rendered to
+            maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
 
-        # temporarily create ambient light
-        self.maya.send_command(self.maya.create_ambient_light())
+            # temporarily create ambient light
+            self.maya.send_command(self.maya.create_ambient_light())
 
-        # render the thumbnail
-        self.maya.send_command(self.maya.render_thumbnail())
+            # render the thumbnail
+            self.maya.send_command(self.maya.render_thumbnail())
 
-        # delete the temp ambient light
-        self.maya.send_command(self.maya.delete_ambient_light())
+            # delete the temp ambient light
+            self.maya.send_command(self.maya.delete_ambient_light())
 
-        # move the rendered thumbnail from the Maya project directory to the new asset folder
-        # first get the open maya file name because that is what the image will be named
-        maya_file_name = Path(self.maya.send_command(self.maya.get_file_name())).stem
-        if maya_file_name == "": # if the project is unsaved, the get_file_name() method returns nothing and the render will be saved as "untitled"
-            maya_file_name = "untitled"
-        maya_file_name = f"{maya_file_name}.jpg"
-        thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / maya_file_name
-        thumbnail_destination = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
-        target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
-        shutil.move(thumbnail_source, target_thumbnail_path)
+            # move the rendered thumbnail from the Maya project directory to the new asset folder
+            # first get the open maya file name because that is what the image will be named
+            maya_file_name = Path(self.maya.send_command(self.maya.get_file_name())).stem
+            if maya_file_name == "": # if the project is unsaved, the get_file_name() method returns nothing and the render will be saved as "untitled"
+                maya_file_name = "untitled"
+            maya_file_name = f"{maya_file_name}.jpg"
+            thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / maya_file_name
+            thumbnail_destination = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
+            target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
+            shutil.move(thumbnail_source, target_thumbnail_path)
 
-        # refresh the sub_subcategory_list to show the new asset folder
-        self.load_sub_subcategories()
+            # refresh the sub_subcategory_list to show the new asset folder
+            self.load_sub_subcategories()
 
+        else:
+            print("to submit an asset to 3ds Max, please complete the function submit_new_asset")
 
     
     def position_gear_button(self):

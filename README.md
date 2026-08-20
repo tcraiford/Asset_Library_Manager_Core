@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/31155241/README.md)
 # Asset Library Manager
 
 A desktop application that manages a shared 3D-asset repository and drives Autodesk Maya remotely over a hand-rolled TCP client/server protocol. Built to solve a real production problem: keeping a team's 3D models, textures, and file references consistent and discoverable instead of scattered across individual artists' machines.

@@ -1,3 +1,6 @@
+# This class file is imported by the asset_library driver, establishes connection with Maya via socket
+# and sends one-liner commands to Maya
+
 from pathlib import Path
 import socket
 import shutil
