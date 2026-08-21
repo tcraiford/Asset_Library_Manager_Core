@@ -206,6 +206,10 @@ class AssetLibraryApp(QMainWindow):
         # Flag to track connection status with Maya
         self.connected_to_maya = False  
 
+        self.max = MaxClient()
+
+        self.connected_to_max = False
+
         # password protection for some actions
         self.HARDCODED_PASSWORD = "0000"
         self.is_admin = False
@@ -342,7 +346,9 @@ class AssetLibraryApp(QMainWindow):
             self.maya.send_command(self.maya.test_button())
 
         else:
-            print("to test a 3ds Max function, please complete the do_function_test method")
+            print("max function test button pressed")
+            self.max.connect_to_max()
+            self.max.send_command(self.max.create_cube())
 
 
     def set_up_dcc_connection(self):
