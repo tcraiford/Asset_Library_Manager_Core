@@ -11,6 +11,8 @@ class MaxClient:
         self.port = port
         self.client = None
 
+
+
     def connect_to_max(self):
         """Establishes a single, permanent connection channel to Max"""
         try:
@@ -24,7 +26,7 @@ class MaxClient:
             return False
 
     def send_command(self, command: str) -> str:
-        """Sends a command down the already existing live socket pipeline."""
+        """Sends a command through the existing live socket"""
         if not self.client:
             raise ConnectionError("No active socket connection to 3ds Max. Call connect_to_max() first.")
         
@@ -36,7 +38,6 @@ class MaxClient:
             response = self.client.recv(4096).decode("utf-8")
             return response.strip()
         except Exception as e:
-            print("I'm a goofy goober oh and your Exception is getting thrown, too.")
             self.disconnect_from_max()
             raise ConnectionError(f"Max communication broken: {e}")
 
@@ -72,37 +73,3 @@ class MaxClient:
 
 
 
-"""
-    def __init__(self, host: str = "127.0.0.1", port: int = 4004):
-        self.host = host
-        self.port = port
-
-    def test_max_connection(self):
-        try:
-            with socket.create_connection((self.host, self.port), timeout=2.0) as client:
-                cmd = "print('3ds Max connection test successful')"
-                cmd_final = cmd.encode("utf-8") + b"\n"
-                client.sendall(cmd_final)
-
-                cmd = 'import pymxs; import os'
-                cmd_final = cmd.encode("utf-8") + b"\n"
-                client.sendall(cmd_final)
-
-                return True
-        except (socket.timeout, ConnectionRefusedError):
-            return False
-
-    def send_command(self, command: str) -> str:
-        #Sends a Python string command to Max and returns the string response.
-        try:
-            with socket.create_connection((self.host, self.port), timeout=30.0) as client:
-                client.sendall(f"{command}\n".encode("utf-8"))
-
-                #get response from Max
-                response = client.recv(4096).decode("utf-8")
-                # remove any trailing null bytes from Maya's response
-                response = response.replace("\x00", "")
-                response = response.replace("\r", "")
-                return response.strip()
-        except Exception as e:
-            raise ConnectionError(f"Max communication timed out: {e}")"""

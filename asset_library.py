@@ -249,6 +249,7 @@ class AssetLibraryApp(QMainWindow):
         control_button_layout = QHBoxLayout()
         self.dcc_selection = QComboBox()
         self.dcc_selection.addItems(['Maya', '3ds Max'])
+        self.dcc_selection.currentIndexChanged.connect(lambda i: self.clear_all_lists())
         control_button_layout.addWidget(self.dcc_selection)
         test_button = QPushButton("Function Test")
         control_button_layout.addWidget(test_button)
@@ -310,6 +311,7 @@ class AssetLibraryApp(QMainWindow):
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
         self.position_gear_button()
+
 
     # gets the default maya scripts folder directory
     def get_maya_scripts_dir(self):
@@ -379,6 +381,26 @@ class AssetLibraryApp(QMainWindow):
 
         else:
             print("To connect to 3ds max, please complete the method set_up_dcc_connection")
+            if not self.connected_to_max:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Max Connection Setup")
+                msg_box.setText("Please launch Max and open the port for communication.\nPress 'Continue' once Max is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    print("Testing connection...")
+                    if self.max.connect_to_max():
+                        self.connected_to_max = True
+                    else:
+                        QMessageBox.warning(self, "Connection Faiulure", "Failed initial connection with 3ds Max")
+                else:
+                    print("User canceled the operation.")
+                    return
+
 
 
     def open_asset_in_scene(self):
@@ -395,6 +417,13 @@ class AssetLibraryApp(QMainWindow):
 
         else:
             print("Opening in 3ds Max")
+            if not self.connected_to_max:
+                self.set_up_dcc_connection()
+
+            file_path = self.get_selected_asset_path()
+            print(file_path)
+
+            
         
 
     def submit_new_asset(self):
@@ -557,15 +586,18 @@ class AssetLibraryApp(QMainWindow):
 
                 list_widget.addItem(item)
 
-    """These are the methods that are called when a folder in the lists is selected that tells the next list what to display. They are called by the itemSelectionChanged action inside __innit__"""
-    def load_subcategories(self):
-        # wipe downstream columns clean so if you change your category selection, it doesn't get confused by your subcategory selection data
+    def clear_all_lists(self):
+                # wipe downstream columns clean so if you change your category selection, it doesn't get confused by your subcategory selection data
         self.subcategory_list.clear()
         self.sub_subcategory_list.clear()
         self.asset_folder_contents_list.clear()
         # clear the thumbnail displayed
         self.preview_thumbnail.clear()
         self.preview_thumbnail.setText("Select an asset to view preview")
+
+    """These are the methods that are called when a folder in the lists is selected that tells the next list what to display. They are called by the itemSelectionChanged action inside __innit__"""
+    def load_subcategories(self):
+        self.clear_all_lists()
 
         # get whatever item is currently selected
         selected_items = self.category_list.selectedItems()
@@ -650,18 +682,31 @@ class AssetLibraryApp(QMainWindow):
                 if file.is_file():
                     # check file extension
                     ext = file.suffix.lower()
-                    
-                    if ext in (".obj", ".fbx", ".ma", ".mb", ".max"):
-                        geometry_files.append(file)
-                        # remove the directory and only keep the name of the file
-                        item = QListWidgetItem(file.name)
+                    if self.dcc_selection.currentText() == "Maya":
 
-                        # put the full directory and name, combined, into slot 100
-                        # this isn't visible to the user but the code reads it when clicked
-                        # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
-                        item.setData(100, file)
+                        if ext in (".obj", ".fbx", ".ma", ".mb"):
+                            geometry_files.append(file)
+                            # remove the directory and only keep the name of the file
+                            item = QListWidgetItem(file.name)
 
-                        self.asset_folder_contents_list.addItem(item)
+                            # put the full directory and name, combined, into slot 100
+                            # this isn't visible to the user but the code reads it when clicked
+                            # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                            item.setData(100, file)
+
+                            self.asset_folder_contents_list.addItem(item)
+                    else:
+                        if ext in (".obj", ".fbx", ".max"):
+                            geometry_files.append(file)
+                            # remove the directory and only keep the name of the file
+                            item = QListWidgetItem(file.name)
+
+                            # put the full directory and name, combined, into slot 100
+                            # this isn't visible to the user but the code reads it when clicked
+                            # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                            item.setData(100, file)
+
+                            self.asset_folder_contents_list.addItem(item)
 
 
 
