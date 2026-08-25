@@ -1,120 +1,65 @@
--- RUN THIS IN 3DS MAX (MAXScript Editor)
-global maxTcpWorker
-global maxTcpListener
-global handleTcpSocketConnection
-global runSocketLoop
-global maxMainThreadTimer
+# creates a counter and ++ the counter each time a command comes through
+# counter can be checked by entering this command into 3ds Max's scripting Editor
+'''
+print(MAX_SOCKET_COUNT)
 
--- Thread Synchronization Safe Buffers
-global maxPythonCommandQueue = ""
-global maxPythonCommandDone = false
+    '''
 
--- FIXED FUNCTION DECLARATION
-global processMainThreadQueue -- Declare variable name globally first
-fn processMainThreadQueue sender args = ( -- Assign function definition natively second
-    if maxPythonCommandQueue != "" then (
-        try (
-            -- Execute the raw python string without any string escape limitations
-            python.Execute maxPythonCommandQueue
-        ) catch (
-            print "Main Thread Python runtime error encountered."
-        )
-        -- Instantly signal the socket thread that we are finished drawing the geometry
-        maxPythonCommandDone = true
-        maxPythonCommandQueue = ""
-    )
-)
+import socket
+import pymxs
+import traceback
+import os
+from PySide6 import QtCore
 
-fn handleTcpSocketConnection sender args = (
-    local clientSocket = undefined
-    try (
-        clientSocket = maxTcpListener.AcceptTcpClient()
-        local stream = clientSocket.GetStream()
-        local buffer = dotNetObject "System.Byte[]" 8192
-        local isConnected = true
+# initialize a diagnostic counter globally
+# use this to manually test if 3ds max is receiving commands
+global MAX_SOCKET_COUNT
+MAX_SOCKET_COUNT = 0
+
+if hasattr(pymxs, '_socket_timer'):
+    try:
+        pymxs._socket_timer.stop()
+        pymxs._socket_timer.timeout.disconnect()
+    except Exception:
+        pass
+
+# innitialize the server to receive commands
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(('127.0.0.1', 4004))
+server.listen(1)
+server.setblocking(False)
+
+def check_socket_tick():
+    global MAX_SOCKET_COUNT
+    try:
+        client_conn, addr = server.accept()
+        data = client_conn.recv(4096).decode("utf-8").strip()
         
-        print "Standalone tool connected! Persistent socket channel established."
-        
-        while isConnected and maxTcpWorker.CancellationPending == false do (
-            if clientSocket.Available > 0 then (
-                local bytesRead = stream.Read buffer 0 buffer.length
-                
-                if bytesRead > 0 then (
-                    local encoding = dotNetClass "System.Text.Encoding"
-                    local incomingString = encoding.UTF8.GetString buffer 0 bytesRead
-                    
-                    if incomingString == "DISCONNECT" then (
-                        print "Standalone tool requested a clean socket disconnect."
-                        isConnected = false
-                    ) else (
-                        print ("Socket received payload:\n" + incomingString)
-                        
-                        -- Set up the main thread processing gate
-                        maxPythonCommandDone = false
-                        maxPythonCommandQueue = incomingString
-                        
-                        -- The background thread loops here, waiting up to 5 seconds for the Main UI thread to finish
-                        local timeoutCounter = 0
-                        while maxPythonCommandDone == false and timeoutCounter < 250 do (
-                            (dotNetClass "System.Threading.Thread").Sleep 20
-                            timeoutCounter += 1
-                        )
-                        
-                        -- Send the success message down the permanent, open pipe
-                        local responseBytes = encoding.UTF8.GetBytes "Success"
-                        stream.Write responseBytes 0 responseBytes.length
-                    )
-                ) else (
-                    isConnected = false
-                )
-            )
-            (dotNetClass "System.Threading.Thread").Sleep 10
-        )
-        if clientSocket != undefined do clientSocket.Close()
-        print "Socket channel closed cleanly."
-    ) catch (
-        print "Socket Exception or Client Disconnection encountered."
-        if clientSocket != undefined do try(clientSocket.Close())catch()
-    )
-)
+        # does max see the code being sent in?
+        if data:
+            MAX_SOCKET_COUNT += 1  # increment the counter immediately
+            
+            try:
+                exec(data, globals())
+                client_conn.sendall(b"Success")
+            except Exception as e:
+                # if the string failed to execute, put a file on the Desktop
+                desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+                with open(os.path.join(desktop, "max_socket_error.txt"), "w") as f:
+                    f.write(traceback.format_exc())
+                client_conn.sendall(f"Crash: {str(e)}".encode("utf-8"))
+            finally:
+                # force the connection closed so library tool can't freeze
+                try:
+                    client_conn.shutdown(socket.SHUT_WR)
+                    client_conn.close()
+                except Exception:
+                    pass
+    except BlockingIOError:
+        pass
 
-fn runSocketLoop sender args = (
-    while (maxTcpWorker != undefined and maxTcpWorker.CancellationPending == false) do (
-        if maxTcpListener != undefined and maxTcpListener.Pending() then (
-            handleTcpSocketConnection sender args
-        )
-        (dotNetClass "System.Threading.Thread").Sleep 50
-    )
-)
+pymxs._socket_timer = QtCore.QTimer()
+pymxs._socket_timer.timeout.connect(check_socket_tick)
+pymxs._socket_timer.start(100)
 
--- Initialization Phase
-(
-    -- 1. Aggressively clean up background objects and timers from memory
-    try ( maxMainThreadTimer.Stop() ) catch()
-    try ( maxTcpWorker.CancelAsync() ) catch()
-    try ( maxTcpListener.Stop() ) catch()
-    maxMainThreadTimer = undefined
-    maxTcpWorker = undefined
-    maxTcpListener = undefined
-
-    -- 2. Spin up the native Main Thread UI Timer
-    maxMainThreadTimer = dotNetObject "System.Windows.Forms.Timer"
-    maxMainThreadTimer.Interval = 50 -- Check for incoming tool commands every 50ms
-    dotNet.addEventHandler maxMainThreadTimer "Tick" processMainThreadQueue
-    maxMainThreadTimer.Start()
-
-    -- 3. Initialize the TCP Listener on Localhost, Port 4004
-    local ipAddress = (dotNetClass "System.Net.IPAddress").Parse "127.0.0.1"
-    maxTcpListener = dotNetObject "System.Net.Sockets.TcpListener" ipAddress 4004
-    maxTcpListener.ExclusiveAddressUse = false
-    maxTcpListener.Server.SetSocketOption (dotNetClass "System.Net.Sockets.SocketOptionLevel").Socket (dotNetClass "System.Net.Sockets.SocketOptionName").ReuseAddress true
-    maxTcpListener.Start()
-
-    -- 4. Spin up the background socket listener
-    maxTcpWorker = dotNetObject "System.ComponentModel.BackgroundWorker"
-    maxTcpWorker.WorkerSupportsCancellation = true
-    dotNet.addEventHandler maxTcpWorker "DoWork" runSocketLoop
-    maxTcpWorker.RunWorkerAsync()
-
-    print "3ds Max Multi-Thread Synchronized Server is active on port 4004. Standing by..."
-)

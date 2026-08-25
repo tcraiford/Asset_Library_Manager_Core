@@ -90,7 +90,7 @@ class MayaClient:
         cmd = 'bool(cmds.ls(selection=True))'
         return cmd
 
-    def reference_file(self, file_dir: str) -> str:
+    def import_asset(self, file_dir: str) -> str:
         if file_dir is None:
             return
         # changes the file path to a string with forward slashes so that Maya can read it correctly

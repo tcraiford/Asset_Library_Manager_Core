@@ -254,10 +254,10 @@ class AssetLibraryApp(QMainWindow):
         test_button = QPushButton("Function Test")
         control_button_layout.addWidget(test_button)
         test_button.clicked.connect(self.do_function_test)
-        submit_new_asset_button = QPushButton("Submit New Asset")
+        submit_new_asset_button = QPushButton("Submit Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
-        send_asset_to_scene_button = QPushButton("Send Asset to Scene")
+        send_asset_to_scene_button = QPushButton("Open Asset")
         control_button_layout.addWidget(send_asset_to_scene_button)
         send_asset_to_scene_button.clicked.connect(self.open_asset_in_scene)
 
@@ -349,7 +349,6 @@ class AssetLibraryApp(QMainWindow):
 
         else:
             print("max function test button pressed")
-            self.max.connect_to_max()
             self.max.send_command(self.max.create_cube())
 
 
@@ -392,11 +391,8 @@ class AssetLibraryApp(QMainWindow):
                 msg_box.exec()
 
                 if msg_box.clickedButton() == continue_button:
-                    print("Testing connection...")
-                    if self.max.connect_to_max():
-                        self.connected_to_max = True
-                    else:
-                        QMessageBox.warning(self, "Connection Faiulure", "Failed initial connection with 3ds Max")
+                    self.connected_to_max = True
+
                 else:
                     print("User canceled the operation.")
                     return
@@ -413,7 +409,7 @@ class AssetLibraryApp(QMainWindow):
             file_path = self.get_selected_asset_path()
             print(file_path)
 
-            self.maya.send_command(self.maya.reference_file(file_path))
+            self.maya.send_command(self.maya.import_asset(file_path))
 
         else:
             print("Opening in 3ds Max")
@@ -422,6 +418,9 @@ class AssetLibraryApp(QMainWindow):
 
             file_path = self.get_selected_asset_path()
             print(file_path)
+            print("sending import to max command")
+            self.max.send_command(self.max.import_asset(file_path))
+            print("import to max command sent")
 
             
         
