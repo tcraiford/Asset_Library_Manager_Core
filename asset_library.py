@@ -75,57 +75,49 @@ class AssetSubmissionDialog(QDialog):
 
     # creates the folders for the new asset submission and handles the archival process
     def submit_asset(self):
-        new_asset_name = self.new_asset_dir / self.new_asset_name_submission.text()
-
-        # determine if anything is selected
-        something_selected = self.maya.send_command(self.maya.determine_if_selected())
-        if something_selected == "False":
-            QMessageBox.warning(self, "No Selection", "Nothing selected in Maya. Please make a selection and try again.")
-            self.close()
-            return
-
-
-        # add /ARCHIVE and /TEXTURES directory and create folder directory
-        # this is called before checking if it already exists because it will work whether or not the folder exists already and we
-        # need that folder to exist for archival purposees too
-        new_asset_archive_folder = new_asset_name / "ARCHIVE"
-        new_asset_textures_folder = new_asset_name / "TEXTURES"
+        # setup base directory paths cleanly
+        submission_text = self.new_asset_name_submission.text()
+        new_asset_folder = self.new_asset_dir / submission_text
+        
+        new_asset_archive_folder = new_asset_folder / "ARCHIVE"
+        new_asset_textures_folder = new_asset_folder / "TEXTURES"
+        
+        # Create folders safely
         new_asset_archive_folder.mkdir(parents=True, exist_ok=True)
         new_asset_textures_folder.mkdir(parents=True, exist_ok=True)
-
- 
-        # checks for pre-existing file and prompts archival
-        # new_asset_name is the file's directory but we need to add the actual file's name and type to the end of the path so we specifically target the file within the folder with the matching name
-        existing_file_name = self.new_asset_name_submission.text() + ".fbx"
-        existing_asset_source = new_asset_name / existing_file_name
-
-        if existing_asset_source.exists():
-            response_to_archival = self.prompt_archival()
-
-            if response_to_archival:
-                # logic to increment the file number in ARCHIVE to prevent overwriting previous Archive files
-                counter = 1
-                archived_file_name = f"ARCHIVE_{existing_file_name.replace('.fbx', '')}_{counter:03d}.fbx"
-
-                existing_asset_destination = new_asset_archive_folder / archived_file_name
-
-                # checks if the Archive file version exists and if so, increments by 1 and tries again
-                while existing_asset_destination.exists():
-                    counter += 1
-                    archived_file_name = f"ARCHIVE_{existing_file_name.replace('.fbx', '')}_{counter:03d}.fbx"
-                    existing_asset_destination = new_asset_archive_folder / archived_file_name
-
-                shutil.move(existing_asset_source, existing_asset_destination)
-
-
-            else:
-                # cancel asset submission if user does not want to archive an existing file
-                QMessageBox.warning(self, "Choose a New Name", "Please choose a different name for the asset submission and try again.")
-                return
-
         
+        file_types = [".fbx", ".ma", ".max"]
+        archival_check = False
+        
+        # loop through extensions to find target files inside the folder
+        for ext in file_types:
+            target_file = new_asset_folder / f"{submission_text}{ext}"
+            
+            if target_file.exists():
+                # prompts the user for archival approval only once per submission otherwise it prompts per fbx, ma, or max file it sees
+                if archival_check == False:
+                    response_to_archival = self.prompt_archival()
+                    archival_check = True
+                
+                if response_to_archival:
+                    # handle version incrementing for archives
+                    counter = 1
+                    archived_file_name = f"ARCHIVE_{submission_text}_{counter:03d}{ext}"
+                    existing_asset_destination = new_asset_archive_folder / archived_file_name
+                    
+                    while existing_asset_destination.exists():
+                        counter += 1
+                        archived_file_name = f"ARCHIVE_{submission_text}_{counter:03d}{ext}"
+                        existing_asset_destination = new_asset_archive_folder / archived_file_name
+                    
+                    # move the file safely using path objects
+                    shutil.move(str(target_file), str(existing_asset_destination))
+                    
+                else:
+                    # cancel submission immediately if user declines archiving
+                    QMessageBox.warning(self, "Choose a New Name", "Please choose a different name for the asset submission and try again.")
+                    return
 
-        # closes the dialog box after submission and returns a True flag to the main window that the submission was successful
         self.accept()
 
     def prompt_archival(self):
@@ -379,7 +371,6 @@ class AssetLibraryApp(QMainWindow):
                     self.connected_to_maya = True
 
         else:
-            print("To connect to 3ds max, please complete the method set_up_dcc_connection")
             if not self.connected_to_max:
                 msg_box = QMessageBox()
                 msg_box.setWindowTitle("Max Connection Setup")
@@ -426,20 +417,28 @@ class AssetLibraryApp(QMainWindow):
         
 
     def submit_new_asset(self):
+        if self.new_asset_submission_directory == "":
+            QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
+            return
+
+        # opens the dialog to create the new asset name and folder
+        submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
+        result = submission_dialog.exec()
+
+        if not result:
+            return
+
+        asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
+        asset_directory_name_fbx = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.fbx"
+        asset_directory_name_ma = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.ma"
+        asset_directory_name_max = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.max"
+
+        
         if self.dcc_selection.currentText() == "Maya":
             if not self.connected_to_maya:
                 self.set_up_dcc_connection()
 
-            if self.new_asset_submission_directory == "":
-                QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
-                return
 
-            # opens the dialog to create the new asset name and folder
-            submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
-            result = submission_dialog.exec()
-
-            if not result:
-                return
 
             # zoom extents of selection in Maya
             self.maya.send_command("cmds.viewFit()")
@@ -447,14 +446,9 @@ class AssetLibraryApp(QMainWindow):
             # send script folder to Maya default location for texture collection
             self.send_script_to_maya_default_folder()
 
-            # sends the export_selected_to_fbx command to maya with the asset directory and adds the new asset name to the end of the path.
-            # This is done by taking the self.new_asset_submission_directory and adding the new asset name from the submission_dialog to it.
-            # The result is a full path to where the new asset will be created in Maya.
-            asset_name = f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-            asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
-            asset_directory_name = asset_directory / asset_name
-            self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name))
-            self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name))
+            # exporting files from Maya to the new directory
+            self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name_fbx))
+            self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name_ma))
 
             # remove any old textures and collect textures for model
             #---------------------------------------------------
@@ -503,6 +497,17 @@ class AssetLibraryApp(QMainWindow):
 
         else:
             print("to submit an asset to 3ds Max, please complete the function submit_new_asset")
+            if not self.connected_to_max:
+                self.set_up_dcc_connection()
+
+            # zoom extents of selection in Max
+            self.max.send_command(self.max.zoom_extents())
+
+            self.max.send_command(self.max.export_selected_as_fbx(asset_directory_name_fbx))
+            self.max.send_command(self.max.export_selected_as_max(asset_directory_name_max))
+
+            # refresh the sub_subcategory_list to show the new asset folder
+            self.load_sub_subcategories()
 
     
     def position_gear_button(self):

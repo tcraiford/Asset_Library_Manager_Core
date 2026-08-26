@@ -63,3 +63,4 @@ pymxs._socket_timer = QtCore.QTimer()
 pymxs._socket_timer.timeout.connect(check_socket_tick)
 pymxs._socket_timer.start(100)
 
+print("Awaiting commands via socket port...")

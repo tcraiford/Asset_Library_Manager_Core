@@ -43,26 +43,16 @@ class MaxClient:
         return cmd
 
 
-
     def export_selected_as_max(self, file_path: str) -> str:
             clean_path = Path(file_path).as_posix()
-            cmd = f'from pymxs import runtime as rt; rt.saveMaxFile("{clean_path}", selectedOnly=True)'
+            cmd = f'from pymxs import runtime as rt\nrt.saveMaxFile("{clean_path}", selectedOnly=True)'
             return cmd
 
-    '''def import_asset(self, file_path: str) -> str:
-        path_obj = Path(file_path)
-        clean_path = path_obj.as_posix()
-        print(f"The clean path is: {clean_path}")
-        suffix = path_obj.suffix.lower()
+    def export_selected_as_fbx(self, file_path: str) -> str:
+        clean_path = Path(file_path).as_posix()
+        cmd = f'import pymxs\npymxs.runtime.FBXExporterSetParam("ResetExport")\npymxs.runtime.exportFile("{clean_path}", pymxs.runtime.Name("noPrompt"), selectedOnly=True, using=pymxs.runtime.FBXEXP)'
+        return cmd
 
-        if suffix == ".max":
-            cmd = (f"import pymxs\nrt = pymxs.runtime\nrt.mergeMAXFile('{clean_path}', select=True, quiet=True)")
-
-
-        else:
-            cmd = (f"import pymxs\nrt = pymxs.runtime\nrt.FBXImporterSetParam('ShowWarnings', False)\nrt.importFile('{clean_path}', rt.Name('noPrompt'))")
-
-        return cmd'''
 
     def import_asset(self, file_path: str) -> str:
         path_obj = Path(file_path)
@@ -79,6 +69,10 @@ class MaxClient:
             
         return cmd
 
+    def zoom_extents(self):
+        cmd = 'import pymxs\npymxs.runtime.execute("max tool zoomextents")'
+
+        return cmd
 
 
 

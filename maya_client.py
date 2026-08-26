@@ -34,7 +34,7 @@ class MayaClient:
     def send_command(self, command: str) -> str:
         """Sends a Python string command to Maya and returns the string response."""
         try:
-            with socket.create_connection(self.host, self.port) as client:
+            with socket.create_connection((self.host, self.port)) as client:
                 client.settimeout(30) # allows a half min length of time for a file export but will fail if it takes longer
                 # Maya expects commands terminated by a newline
                 client.sendall(f"{command}\n".encode("utf-8"))
