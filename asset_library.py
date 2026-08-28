@@ -506,10 +506,7 @@ class AssetLibraryApp(QMainWindow):
             # self.max.render_thumbnail() adds the "thumbnail.jpg" to the end of the directory
             self.max.send_command(self.max.render_thumbnail(asset_directory))
 
-            # run the collect textures method and put them into a tmp folder, then run the archive_texture_files method,
-            # then move the textures out of tmp and into the root of TEXTURES
-            # !!! Need to do this because if a asset is pointing to TEXTURES for its material, we will break the shader connection
-            # by moving the material to the BACKUP folder and then that texture won't get collected for this new submission version
+
             textures_folder = asset_directory / "TEXTURES"
 
             self.max.send_command(self.max.collect_textures(textures_folder))
