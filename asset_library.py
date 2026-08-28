@@ -413,8 +413,21 @@ class AssetLibraryApp(QMainWindow):
             self.max.send_command(self.max.import_asset(file_path))
             print("import to max command sent")
 
-            
-        
+    # delete texture backup folder and move any existing textures into clean backup folder for each asset being submitted
+    def archive_texture_files(self, asset_directory):
+        textures_folder = asset_directory / "TEXTURES"
+        backup_folder = textures_folder / "BACKUP"
+        # delete backup_folder if it exists for the asset then create a new empty one
+        if backup_folder.exists():
+            shutil.rmtree(backup_folder)
+        backup_folder.mkdir(parents=True, exist_ok=True)
+
+        # copy all contents of TEXTURES folder that are not a directory into backup_folder
+        for item in textures_folder.iterdir():
+            if item == backup_folder:
+                continue
+            if not item.is_dir() and not item.is_symlink():
+                shutil.move(item, backup_folder)        
 
     def submit_new_asset(self):
         if self.new_asset_submission_directory == "":
@@ -450,35 +463,17 @@ class AssetLibraryApp(QMainWindow):
             self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name_fbx))
             self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name_ma))
 
-            # remove any old textures and collect textures for model
-            #---------------------------------------------------
+            # moves texture files to backup folder and collects associated textures from new submission and puts them in TEXTURES folder
+            self.archive_texture_files(asset_directory)
             textures_folder = asset_directory / "TEXTURES"
-            backup_folder = textures_folder / "BACKUP"
-
-            # delete backup_folder if it exists for the asset then create a new empty one
-            if backup_folder.exists():
-                shutil.rmtree(backup_folder)
-            backup_folder.mkdir(parents=True, exist_ok=True)
-
-            # copy all contents of TEXTURES folder that are not a directory into backup_folder
-            for item in textures_folder.iterdir():
-                if item == backup_folder:
-                    continue
-                if not item.is_dir() and not item.is_symlink():
-                    shutil.move(item, backup_folder)
-
             self.maya.send_command(self.maya.collect_textures(textures_folder))
 
             # get the project directory for Maya where the thumbnail will be rendered to
             maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
 
-            # temporarily create ambient light
+            # temporarily create ambient light then render thumbnail then delete the temp light
             self.maya.send_command(self.maya.create_ambient_light())
-
-            # render the thumbnail
             self.maya.send_command(self.maya.render_thumbnail())
-
-            # delete the temp ambient light
             self.maya.send_command(self.maya.delete_ambient_light())
 
             # move the rendered thumbnail from the Maya project directory to the new asset folder
@@ -506,8 +501,37 @@ class AssetLibraryApp(QMainWindow):
             self.max.send_command(self.max.export_selected_as_fbx(asset_directory_name_fbx))
             self.max.send_command(self.max.export_selected_as_max(asset_directory_name_max))
 
+            # command being used automatically overwrites files with the same name and also takes
+            # file path's as an argument for where to save the image
+            # self.max.render_thumbnail() adds the "thumbnail.jpg" to the end of the directory
+            self.max.send_command(self.max.render_thumbnail(asset_directory))
+
+            # run the collect textures method and put them into a tmp folder, then run the archive_texture_files method,
+            # then move the textures out of tmp and into the root of TEXTURES
+            # !!! Need to do this because if a asset is pointing to TEXTURES for its material, we will break the shader connection
+            # by moving the material to the BACKUP folder and then that texture won't get collected for this new submission version
+            textures_folder = asset_directory / "TEXTURES"
+
+            self.max.send_command(self.max.collect_textures(textures_folder))
+            print("moved all files to tmp folder")
+
+            self.archive_texture_files(asset_directory)
+            print("archived old texture files")
+
+            # move files from tmp folder to root of TEXTURES folder
+
+            tmp_folder = textures_folder / "tmp"
+            for item in tmp_folder.iterdir():
+                shutil.move(str(item), str(textures_folder / item.name))
+            print("moved new files from tmp to textures root")
+
+            tmp_folder.rmdir()
+            print("deleted tmp folder")
+
             # refresh the sub_subcategory_list to show the new asset folder
             self.load_sub_subcategories()
+
+
 
     
     def position_gear_button(self):

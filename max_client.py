@@ -53,6 +53,26 @@ class MaxClient:
         cmd = f'import pymxs\npymxs.runtime.FBXExporterSetParam("ResetExport")\npymxs.runtime.exportFile("{clean_path}", pymxs.runtime.Name("noPrompt"), selectedOnly=True, using=pymxs.runtime.FBXEXP)'
         return cmd
 
+    def render_thumbnail(self, file_path):
+        file_path_object = Path(file_path)
+        filename_path = file_path_object / "thumbnail.jpg"
+        clean_path = filename_path.as_posix()
+
+        # uses the scanline render
+        cmd = f"import pymxs\nrt = pymxs.runtime\nrt.renderers.current = rt.Default_Scanline_Renderer()\nrt.render(outputSize=rt.Point2(512, 512), outputFile='{clean_path}', vfb=False)"
+
+        return cmd
+
+    def collect_textures(self, file_path):
+        clean_path = file_path.as_posix()
+
+        # get current file location so max knows where to load the max_scripts.py class from
+        # do this instead of having to inject the class file into a scripts folder like we did for Maya
+        current_tool_dir = Path(__file__).resolve().parent.as_posix()
+
+        cmd = f"import sys, importlib\nsys.path.append('{current_tool_dir}') if '{current_tool_dir}' not in sys.path else None\nimport max_scripts\nimportlib.reload(max_scripts)\nmax_scripts.repath_selected_textures('{clean_path}')"
+        return cmd
+
 
     def import_asset(self, file_path: str) -> str:
         path_obj = Path(file_path)
