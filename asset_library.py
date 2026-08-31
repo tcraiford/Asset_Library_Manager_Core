@@ -2,6 +2,7 @@ import os
 import shutil
 import sys
 import configparser
+import time
 
 from maya_client import MayaClient
 from max_client import MaxClient
@@ -274,7 +275,7 @@ class AssetLibraryApp(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
 
         # create a label to be shown at the top of the tool
-        description = QLabel("A tool to manage your asset library.")
+        description = QLabel("Created by Taylor Raiford: V1.0")
 
         # create the directory line layout
         dir_layout = QHBoxLayout()
@@ -297,8 +298,8 @@ class AssetLibraryApp(QMainWindow):
         gear_menu = QMenu(self)
         # add gear_menu functions here. Format is string for displayed menu option and then the function
         gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
-        gear_menu.addAction("Create Starting Library", self.create_starting_library)
-        gear_menu.addAction("Change Library Directory", self.change_directory)
+        gear_menu.addAction("Create New Library", self.create_starting_library)
+        gear_menu.addAction("Temporarily Change Library Directory", self.change_directory)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
@@ -463,10 +464,24 @@ class AssetLibraryApp(QMainWindow):
             self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name_fbx))
             self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name_ma))
 
-            # moves texture files to backup folder and collects associated textures from new submission and puts them in TEXTURES folder
-            self.archive_texture_files(asset_directory)
+            # collect textures first and put them into tmp folder. Move any existing textures into BACKUP. Then move tmp folder contents into TEXTURES root            
             textures_folder = asset_directory / "TEXTURES"
+            tmp_folder = textures_folder / "tmp"
+            tmp_folder.mkdir(parents=True, exist_ok=True)
+            # call collect_textures to tmp folder first, then archive contents of root TEXTURES, then call collect_textures to root TEXTURES folder
+            # do this because maya will fail to map materials to texture files if they're not currently in the directory you're mapping to
+            self.maya.send_command(self.maya.collect_textures(tmp_folder))
+            self.archive_texture_files(asset_directory)
             self.maya.send_command(self.maya.collect_textures(textures_folder))
+            for attempt in range(5): # attempts to delete the folder 5 times allowing for a slight pause so that Maya has enough time to complete its screen refresh and unlock the textures in tmp
+                try:
+                    shutil.rmtree(tmp_folder)
+                    break
+                except:
+                    time.sleep(0.3) # wait 300 miliseconds and try to delete the tmp_folder again
+
+
+
 
             # get the project directory for Maya where the thumbnail will be rendered to
             maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())

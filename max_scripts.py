@@ -3,9 +3,6 @@ import hashlib
 from pathlib import Path
 import pymxs
 
-current_tool_dir = r"C:\Users\traiford\Desktop\Work\0Personal\AssetLibraryTool"
-clean_path = r"C:\Users\traiford\Desktop\Work\0Personal\AssetLibraryTool\Asset_Library\Environment\Buildings\a\TEXTURES"
-clean_path = Path(clean_path).as_posix()
 
 # Convert the texture file to a hash and compare it to any other textures that share the same name
 def get_file_hash(file_path: Path):
