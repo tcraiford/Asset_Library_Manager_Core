@@ -28,6 +28,10 @@ If a scene points all of its references to hundreds of assets, textures and mode
 * Identifies any texture files associated with the model being submitted and copies them to the asset’s TEXTURES folder and redirects the model to point to that library submission location instead of scattered across the artist’s local hard drive while moving the previous texture image files into a one-generation BACKUP folder (this is to prevent archiving hundreds of image files over the many versions of the model)  
 * Automatically render a thumbnail of the model submission to be displayed in the Asset Library Tool
 
+### Asset Pulling Workflow
+* User can browse through the library of submitted assets with the tool and import the current version or an ARCHIVED version of the asset into their active Maya or 3ds Max scene
+* When an asset is opened in the modeling software via the library tool, it is duplicated from the library into their active session but the original is never directly opened. This prevents artists from making unwanted changes to a file and using the modeling software's "Save" to make changes to the published file. If they make changes and publish the model with the library tool, it will create a new version of the asset, but the original version that was pulled will be preserved
+
 ### Remote Control of Maya and 3ds Max
 
 * MayaClient and MaxClient connect to the commandPort and Scripting Listener over raw TCP sockets. Maya/Max are the listener/server while the desktop app is the client  
