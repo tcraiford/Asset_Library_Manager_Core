@@ -2,6 +2,14 @@
 
 This is a desktop application that manages a shared 3d asset repository and drives Maya and 3ds Max remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
 
+## How to Use
+
+1. Change the *settings.example.ini* to *settings.ini* and set “library\_dir” to wherever you want the library to live  
+2. Open the port:  
+   1. For Maya, run the *Maya\_Port\_Open.py* in the script editor, set to python  
+   2. For Max, run the *Max\_Port\_Open.py* in a new script inside of Max, set to python  
+3. Run *asset\_library.py* to launch the tool
+
 ## Why is it needed?
 
 In 3d production pipelines, “where’s the latest version of this asset” and “why are the textures missing” are constant, expensive problems, frequently caused by artists saving files in inconsistent locations or moving files without updating references. This tool centralizes submission and retrieval so that:  
@@ -84,10 +92,3 @@ This is a personal/portfolio-stage project, not a hardened production tool and a
 
 While this is used in a few studios, both are natural next steps if this becomes a marketed product.
 
-## How to Use
-
-1. Change the *settings.example.ini* to *settings.ini* and set “library\_dir” to wherever you want the library to live  
-2. Open the port:  
-   1. For Maya, run the *Maya\_Port\_Open.py* in the script editor, set to python  
-   2. For Max, run the *Max\_Port\_Open.py* in a new script inside of Max, set to python  
-3. Run *asset\_library.py* to launch the tool
