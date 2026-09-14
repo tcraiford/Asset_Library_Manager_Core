@@ -2,14 +2,6 @@
 
 This is a desktop application that manages a shared 3d asset repository and drives Maya and 3ds Max remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
 
-## How to Use
-
-1. Change the *settings.example.ini* to *settings.ini* and set “library\_dir” to wherever you want the library to live  
-2. Open the port:  
-   1. For Maya, run the *Maya\_Port\_Open.py* in the script editor, set to python  
-   2. For Max, run the *Max\_Port\_Open.py* in a new script inside of Max, set to python  
-3. Run *asset\_library.py* to launch the tool
-
 ## Why is it needed?
 
 In 3d production pipelines, “where’s the latest version of this asset” and “why are the textures missing” are constant, expensive problems, frequently caused by artists saving files in inconsistent locations or moving files without updating references. This tool centralizes submission and retrieval so that:  
@@ -35,10 +27,6 @@ If a scene points all of its references to hundreds of assets, textures and mode
 * If versioning up an asset, the previous version is renamed to “ARCHIVE\_” as a prefix and a version number as the suffix and moved into the ARCHIVE folder for that asset in the library  
 * Identifies any texture files associated with the model being submitted and copies them to the asset’s TEXTURES folder and redirects the model to point to that library submission location instead of scattered across the artist’s local hard drive while moving the previous texture image files into a one-generation BACKUP folder (this is to prevent archiving hundreds of image files over the many versions of the model)  
 * Automatically render a thumbnail of the model submission to be displayed in the Asset Library Tool
-
-### Asset Pulling Workflow
-* User can browse through the library of submitted assets with the tool and import the current version or an ARCHIVED version of the asset into their active Maya or 3ds Max scene
-* When an asset is opened in the modeling software via the library tool, it is duplicated from the library into their active session but the original is never directly opened. This prevents artists from making unwanted changes to a file and using the modeling software's "Save" to make changes to the published file. If they make changes and publish the model with the library tool, it will create a new version of the asset, but the original version that was pulled will be preserved
 
 ### Remote Control of Maya and 3ds Max
 
@@ -92,3 +80,10 @@ This is a personal/portfolio-stage project, not a hardened production tool and a
 
 While this is used in a few studios, both are natural next steps if this becomes a marketed product.
 
+## How to Use
+
+1. Change the *settings.example.ini* to *settings.ini* and set “library\_dir” to wherever you want the library to live  
+2. Open the port:  
+   1. For Maya, run the *Maya\_Port\_Open.py* in the script editor, set to python  
+   2. For Max, run the *Max\_Port\_Open.py* in a new script inside of Max, set to python  
+3. Run *asset\_library.py* to launch the tool

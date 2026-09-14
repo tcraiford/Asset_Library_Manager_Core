@@ -1,9 +1,12 @@
+import getpass
 import os
 import shutil
 import sys
 import configparser
 import time
+import sqlite3
 
+from datetime import datetime
 from maya_client import MayaClient
 from max_client import MaxClient
 from requiredChecks import check_required_libraries
@@ -392,27 +395,23 @@ class AssetLibraryApp(QMainWindow):
 
 
     def open_asset_in_scene(self):
+        file_path = self.get_selected_asset_path()
+        
         if self.dcc_selection.currentText() == "Maya":
-            print("Opening asset in Maya")
         
             if not self.connected_to_maya:
                 self.set_up_dcc_connection()
 
-            file_path = self.get_selected_asset_path()
-            print(file_path)
-
             self.maya.send_command(self.maya.import_asset(file_path))
 
         else:
-            print("Opening in 3ds Max")
             if not self.connected_to_max:
                 self.set_up_dcc_connection()
-
-            file_path = self.get_selected_asset_path()
-            print(file_path)
-            print("sending import to max command")
+            
             self.max.send_command(self.max.import_asset(file_path))
-            print("import to max command sent")
+
+        # log the asset pull in the database
+        self.log_asset_action("pull", f"{Path(file_path).name}")
 
     # delete texture backup folder and move any existing textures into clean backup folder for each asset being submitted
     def archive_texture_files(self, asset_directory):
@@ -505,8 +504,11 @@ class AssetLibraryApp(QMainWindow):
             # refresh the sub_subcategory_list to show the new asset folder
             self.load_sub_subcategories()
 
+            # log the asset submission to the database
+            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.ma")
+            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.fbx")
+
         else:
-            print("to submit an asset to 3ds Max, please complete the function submit_new_asset")
             if not self.connected_to_max:
                 self.set_up_dcc_connection()
 
@@ -543,6 +545,10 @@ class AssetLibraryApp(QMainWindow):
             # refresh the sub_subcategory_list to show the new asset folder
             self.load_sub_subcategories()
 
+            # log the asset submission to the database
+            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.max")
+            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.fbx")
+
 
 
     
@@ -572,12 +578,35 @@ class AssetLibraryApp(QMainWindow):
         if self.check_admin_access():
             self.set_base_directory()
             starting_library_path = self.directory_line.text()
-            create_starting_library(starting_library_path)
+            create_starting_library(starting_library_path) # create_starting_library() is a function defined at the top of this file, as well
             # creates variable new path and adds "Asset_Library" to the "pathed" self.directory_line
             new_path = Path(self.directory_line.text()) / "Asset_Library"
             # converts new_path from a Path to plain text and plugs it into the directory_line
             self.directory_line.setText(str(new_path))
             self.set_base_directory()
+            # sets the directory for the production_log file. It will be created in the root of the Asset_Library folder. This is a sqlite3 database that will track all asset submissions and changes to the library
+            db_path = new_path / "production_log.db"
+            # connect to the database. If the database file does not exist, it will be created automatically
+            conn = sqlite3.connect(str(db_path), timeout = 15)
+            # create a cursor object to execute SQL commands
+            try:
+                cursor = conn.cursor()
+                # create a table to track asset submissions and changes if it doesn't exist yet
+                cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    artist TEXT,
+                    action TEXT,
+                    asset_name TEXT
+                    )''')
+
+            except sqlite3.Error as e:
+                QMessageBox.critical(self, "Database Error", f"An error occurred while connecting to the database: {e}")
+
+            finally:
+                # close the database connection
+                conn.close()
+
 
     def set_base_directory(self):
         self.current_directory = self.directory_line.text()
@@ -602,7 +631,57 @@ class AssetLibraryApp(QMainWindow):
                 return True
             else:
                 QMessageBox.critical(self, "Incorrect Password", "The password entered is incorrect.")
-        return False
+        return False        
+
+    # this method logs the asset push and pulls to a sqlite3 database
+    def log_asset_action(self, action, asset_name):
+        # get the current system user as the artist
+        artist = getpass.getuser()
+
+        db_path = Path(self.directory_line.text()) / "production_log.db"
+        conn = sqlite3.connect(str(db_path), timeout=15)
+        try:
+            cursor = conn.cursor()
+            # if db file is missing or doesn't exist, this will create it and then create the table
+            cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                artist TEXT,
+                action TEXT,
+                asset_name TEXT
+            )''')
+
+            # assign variable timestamp to the current date and time in the format YYYY-MM-DD HH:MM:SS
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # execute the SQL command to insert the log entry into the asset_log table
+            cursor.execute("INSERT INTO asset_log (timestamp, artist, action, asset_name) VALUES (?, ?, ?, ?)", (timestamp, artist, action, asset_name))
+
+            # commit the changes to the database
+            conn.commit()
+            print("Successfully logged asset action to database.")
+
+        except sqlite3.OperationalError as e:
+            QMessageBox.critical(self, "Database Error", f"An error occurred while logging asset action. The database was busy for too long: {e}")
+
+            # create local backup database if unable to push sql update to the main database. This will create a backup database in the same directory as this script and log the action there
+            backup_db_path = Path(__file__).resolve().parent / "production_log_backup.db"
+            backup_conn = sqlite3.connect(str(backup_db_path), timeout=15)
+            backup_cursor = backup_conn.cursor()
+            backup_cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                artist TEXT,
+                action TEXT,
+                asset_name TEXT
+            )''')
+            backup_cursor.execute("INSERT INTO asset_log (timestamp, artist, action, asset_name) VALUES (?, ?, ?, ?)", (timestamp, artist, action, asset_name))
+            backup_conn.commit()
+            backup_conn.close()
+
+        finally:
+            conn.close()
+
 
     """this method clears the list_widget from any leftovers. It then looks at the directory and all its contents and says it only cares if the contents item is a folder.
     It then takes each folder and removes the file directory from it so it is only the name of the folder but then stores that removed directory bit into slot 100 for that specific folder.
