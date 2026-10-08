@@ -1,3 +1,6 @@
+# Note on Project Authenticity:
+This pipeline tool was conceptualized, architected, and coded 100% manually without the use of AI generation tools. It serves as a demonstration of my foundational understanding of network socket communication, relational database logging, and navigating complex single-threaded DCC application lifecycles (3ds Max/Maya) 
+
 # Asset Library Manager
 
 This is a desktop application that manages a shared 3d asset repository and drives Maya and 3ds Max remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
