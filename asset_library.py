@@ -13,7 +13,7 @@ from requiredChecks import check_required_libraries
 check_required_libraries()
 
 
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow, QWidget, QVBoxLayout, QPushButton,
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QInputDialog, QMainWindow, QWidget, QVBoxLayout, QPushButton,
                                QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
                                QMenu, QComboBox)
 from PySide6.QtCore import Qt
@@ -178,6 +178,51 @@ class PasswordDialog(QDialog):
     def get_password(self):
         return self.password_input.text()
 
+class DBAuditDialog(QDialog): # Class to create a dialog window for auditing the database
+    def __init__(self, db_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Artist Submission Search")
+        self.resize(600, 400)
+
+        layout = QVBoxLayout()
+
+        self.audit_list = QListWidget()
+        layout.addWidget(self.audit_list)
+
+        self.setLayout(layout)
+
+        self.load_audit_data(db_path)
+        # call the method upon initialization so that the list window is opened and the method gets executed.
+        # Trying to do them separate causes the list window to open but the method doesn't get executed and the list window is blank.
+        # This way, the method is called as soon as the dialog window opens and the list gets populated with the queried data from the database
+
+    def load_audit_data(self, db_path): # open the database and read the asset_log table at given directory and intake name of artist being searched for
+        # get the artist name to search for
+        artist, ok = QInputDialog.getText(self, "Artist Search", "Enter the artist name to search for:")
+
+        if ok and artist.strip(): # if the user clicked OK and entered a non-empty artist name, load the audit data
+
+            self.audit_list.clear() # clear the list widget before loading new data
+            
+            try: # attempt to connect. Timeout after 15 seconds to avoid "database is locked" errors when multiple users are trying to log at the same time
+                conn = sqlite3.connect(str(db_path), timeout=15)
+                cursor = conn.cursor()
+
+                cursor.execute("SELECT * FROM asset_log WHERE artist = ? ORDER BY timestamp DESC", (artist,)) # query the database for all entries by the specified artist, ordered by timestamp in descending order
+                rows = cursor.fetchall()
+
+                for row in rows: # unpack the tuple returned from the database and format it into a string to be displayed in the list widget
+                    timestamp, artist, action, asset_name = row[1], row[2], row[3], row[4] # assign each column to a variable for clarity
+                    item_text = f"{timestamp} | {artist} | {action} | {asset_name}" # create a string with the querried data to be displayed in the list widget
+                    self.audit_list.addItem(item_text) # add the string to the list widget
+            except sqlite3.Error as e:
+                QMessageBox.critical(self, "Database Error", f"An error occurred while accessing the database: {e}")
+
+            finally:
+                conn.close()
+        else:
+            return # if the user clicked Cancel or entered an empty artist name, do nothing and return to the main window
+
 class AssetLibraryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -303,6 +348,7 @@ class AssetLibraryApp(QMainWindow):
         gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
         gear_menu.addAction("Create New Library", self.create_starting_library)
         gear_menu.addAction("Temporarily Change Library Directory", self.change_directory)
+        gear_menu.addAction("Audit Library Submissions", self.audit_library_submissions)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
@@ -567,6 +613,15 @@ class AssetLibraryApp(QMainWindow):
         if self.check_admin_access():
             self.directory_line.setReadOnly(False)
 
+    def audit_library_submissions(self):
+        db_path = Path(self.directory_line.text()) / "production_log.db"
+        if not db_path.exists(): # check if the database file exists in the root of the asset library
+            QMessageBox.warning(self, "Database Not Found", "The production_log.db file was not foundin the asset library root.")
+            return
+
+        audit_dialog = DBAuditDialog(db_path,self) # create the object for the audit dialog window and give it the database path
+        audit_dialog.exec()
+
     # pulls the starting directory from the settings.ini file
     def settings_pull(self):
         # initialize the configparser
@@ -637,9 +692,9 @@ class AssetLibraryApp(QMainWindow):
     def log_asset_action(self, action, asset_name):
         # get the current system user as the artist
         artist = getpass.getuser()
+        db_path = Path(self.directory_line.text()) / "production_log.db" # saves the database in the root directory of the asset folder
+        conn = sqlite3.connect(str(db_path), timeout=15) # creates a connection to the database with a 15 second timeout to avoid "database is locked" errors when multiple users are trying to log at the same time
 
-        db_path = Path(self.directory_line.text()) / "production_log.db"
-        conn = sqlite3.connect(str(db_path), timeout=15)
         try:
             cursor = conn.cursor()
             # if db file is missing or doesn't exist, this will create it and then create the table
