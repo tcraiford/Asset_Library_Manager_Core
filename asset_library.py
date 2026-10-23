@@ -179,7 +179,7 @@ class PasswordDialog(QDialog):
         return self.password_input.text()
 
 class DBAuditDialog(QDialog): # Class to create a dialog window for auditing the database
-    def __init__(self, db_path, parent=None):
+    def __init__(self, db_path, search_type, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Artist Submission Search")
         self.resize(600, 400)
@@ -191,16 +191,16 @@ class DBAuditDialog(QDialog): # Class to create a dialog window for auditing the
 
         self.setLayout(layout)
 
-        self.load_audit_data(db_path)
+        self.load_audit_data(db_path, search_type)
         # call the method upon initialization so that the list window is opened and the method gets executed.
         # Trying to do them separate causes the list window to open but the method doesn't get executed and the list window is blank.
         # This way, the method is called as soon as the dialog window opens and the list gets populated with the queried data from the database
 
-    def load_audit_data(self, db_path): # open the database and read the asset_log table at given directory and intake name of artist being searched for
+    def load_audit_data(self, db_path, search_type): # open the database and read the asset_log table at given directory and intake name of artist being searched for
         # get the artist name to search for
-        artist, ok = QInputDialog.getText(self, "Artist Search", "Enter the artist name to search for:")
+        query, ok = QInputDialog.getText(self, "Search", f"Enter the {search_type} name to search for:")
 
-        if ok and artist.strip(): # if the user clicked OK and entered a non-empty artist name, load the audit data
+        if ok and query.strip(): # if the user clicked OK and entered a non-empty artist name, load the audit data
 
             self.audit_list.clear() # clear the list widget before loading new data
             
@@ -208,7 +208,10 @@ class DBAuditDialog(QDialog): # Class to create a dialog window for auditing the
                 conn = sqlite3.connect(str(db_path), timeout=15)
                 cursor = conn.cursor()
 
-                cursor.execute("SELECT * FROM asset_log WHERE artist = ? ORDER BY timestamp DESC", (artist,)) # query the database for all entries by the specified artist, ordered by timestamp in descending order
+                if search_type == "artist":
+                    cursor.execute("SELECT * FROM asset_log WHERE artist = ? ORDER BY timestamp DESC", (query,)) # query the database for all entries by the specified artist, ordered by timestamp in descending order
+                elif search_type == "asset":
+                    cursor.execute("SELECT * FROM asset_log WHERE asset_name LIKE ? ORDER BY timestamp DESC", ((f"{query}.%"),)) # query the database for any files that have the asset name. The LIKE and the .% allow the code to show all file types, including fbx, ma, and max
                 rows = cursor.fetchall()
 
                 for row in rows: # unpack the tuple returned from the database and format it into a string to be displayed in the list widget
@@ -276,9 +279,16 @@ class AssetLibraryApp(QMainWindow):
         list_layout.addWidget(self.subcategory_list)
         list_layout.addWidget(self.sub_subcategory_list)
 
+        # asset folder contents and info layout to be nested inside asset folder contents layout
+        asset_info_layout = QVBoxLayout()
+        asset_info_layout.addWidget(self.asset_folder_contents_list)
+        self.asset_info = QLabel("Asset Info: \n\n\n\nSelect an asset to see its info here.")
+        asset_info_layout.addWidget(self.asset_info)
+
         # asset folder contents layout
         asset_options_layout = QHBoxLayout()
-        asset_options_layout.addWidget(self.asset_folder_contents_list)
+        asset_options_layout.addLayout(asset_info_layout)
+        # asset_options_layout.addWidget(self.asset_folder_contents_list)
         # create and add the thumbnail
         self.preview_thumbnail = QLabel()
         # makes sure the thumbnail scales properly
@@ -348,7 +358,8 @@ class AssetLibraryApp(QMainWindow):
         gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
         gear_menu.addAction("Create New Library", self.create_starting_library)
         gear_menu.addAction("Temporarily Change Library Directory", self.change_directory)
-        gear_menu.addAction("Audit Library Submissions", self.audit_library_submissions)
+        gear_menu.addAction("Audit Artist Submissions", self.audit_artist_submissions)
+        gear_menu.addAction("Audit Asset Submissions", self.audit_asset_submissions)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
@@ -613,13 +624,22 @@ class AssetLibraryApp(QMainWindow):
         if self.check_admin_access():
             self.directory_line.setReadOnly(False)
 
-    def audit_library_submissions(self):
+    def audit_artist_submissions(self):
         db_path = Path(self.directory_line.text()) / "production_log.db"
         if not db_path.exists(): # check if the database file exists in the root of the asset library
             QMessageBox.warning(self, "Database Not Found", "The production_log.db file was not foundin the asset library root.")
             return
 
-        audit_dialog = DBAuditDialog(db_path,self) # create the object for the audit dialog window and give it the database path
+        audit_dialog = DBAuditDialog(db_path,"artist", self) # create the object for the audit dialog window and give it the database path and tell it to search by artist name instead of asset name
+        audit_dialog.exec()
+
+    def audit_asset_submissions(self):
+        db_path = Path(self.directory_line.text()) / "production_log.db"
+        if not db_path.exists(): # check if the database file exists in the root of the asset library
+            QMessageBox.warning(self, "Database Not Found", "The production_log.db file was not foundin the asset library root.")
+            return
+
+        audit_dialog = DBAuditDialog(db_path,"asset", self) # create the object for the audit dialog window and give it the database path and tell it to search by asset name instead of artist name
         audit_dialog.exec()
 
     # pulls the starting directory from the settings.ini file
@@ -881,6 +901,39 @@ class AssetLibraryApp(QMainWindow):
                             item.setData(100, file)
 
                             self.asset_folder_contents_list.addItem(item)
+
+
+            # pulls the 4 most recent asset submissions from the database and displays them in the asset_info QLabel
+            conn = sqlite3.connect(Path(self.directory_line.text()) / "production_log.db", timeout=15) # open the database
+            cursor = conn.cursor()
+            clean_name = chosen_item.text().strip() # remove any leading or trailing whitespace from the asset name
+            cursor.execute("SELECT * FROM asset_log WHERE asset_name LIKE ? ORDER BY timestamp DESC LIMIT 4", (f"{clean_name}.%",)) # search for the asset name in the database and pull the 4 most recent info for that asset and list them from newest to oldest
+            asset_info = cursor.fetchall()
+
+            # assign variables for each row of the asset_info list and format them into a string to be displayed in the asset_info QLabel
+            # use if len(asset_info) >= 1, 2, 3, 4 to check if there are enough rows in the asset_info list before trying to access them. If there are not enough rows, the variable will be assigned an empty string
+            previous1 = ""
+            previous2 = ""
+            previous3 = ""
+            previous4 = ""
+            if len(asset_info) >= 1:
+                row1 = asset_info[0]
+                previous1 = f"{row1[2]} {row1[3]} {row1[1]}"
+
+            if len(asset_info) >= 2:
+                row2 = asset_info[1]
+                previous2 = f"{row2[2]} {row2[3]} {row2[1]}"
+
+            if len(asset_info) >= 3:
+                row3 = asset_info[2]
+                previous3 = f"{row3[2]} {row3[3]} {row3[1]}"
+
+            if len(asset_info) >= 4:
+                row4 = asset_info[3]
+                previous4 = f"{row4[2]} {row4[3]} {row4[1]}"
+
+            self.asset_info.setText(f"Asset Info: \n{previous1}\n{previous2}\n{previous3}\n{previous4}") # display the asset info in the asset_info QLabel
+            conn.close() # close the database connection
 
 
 
