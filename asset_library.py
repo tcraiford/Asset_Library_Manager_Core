@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 from maya_client import MayaClient
 from max_client import MaxClient
+from unreal_client import UnrealClient
 from requiredChecks import check_required_libraries
 check_required_libraries()
 
@@ -254,6 +255,9 @@ class AssetLibraryApp(QMainWindow):
 
         self.connected_to_max = False
 
+        self.unreal = UnrealClient()
+        self.connected_to_unreal = False
+
         # password protection for some actions
         self.HARDCODED_PASSWORD = "0000"
         self.is_admin = False
@@ -299,7 +303,7 @@ class AssetLibraryApp(QMainWindow):
         # Control button layout
         control_button_layout = QHBoxLayout()
         self.dcc_selection = QComboBox()
-        self.dcc_selection.addItems(['Maya', '3ds Max'])
+        self.dcc_selection.addItems(['Maya', '3ds Max', 'Unreal Engine'])
         self.dcc_selection.currentIndexChanged.connect(lambda i: self.clear_all_lists())
         control_button_layout.addWidget(self.dcc_selection)
         #test_button = QPushButton("Function Test")
@@ -431,7 +435,7 @@ class AssetLibraryApp(QMainWindow):
                 if self.maya.test_maya_connection():
                     self.connected_to_maya = True
 
-        else:
+        elif self.dcc_selection.currentText() == "3ds Max":
             if not self.connected_to_max:
                 msg_box = QMessageBox()
                 msg_box.setWindowTitle("Max Connection Setup")
@@ -445,9 +449,19 @@ class AssetLibraryApp(QMainWindow):
                 if msg_box.clickedButton() == continue_button:
                     self.connected_to_max = True
 
-                else:
-                    print("User canceled the operation.")
-                    return
+        elif self.dcc_selection.currentText() == "Uneal Engine":
+            if not self.connected_to_unreal:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Unreal Engine Connection Setup")
+                msg_box.setText("Verify that Unreal Engine is running and ready for communication.\nPress 'Continue' once Unreal Engine is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    self.connected_to_unreal = True
 
 
 
@@ -461,11 +475,16 @@ class AssetLibraryApp(QMainWindow):
 
             self.maya.send_command(self.maya.import_asset(file_path))
 
-        else:
+        elif self.dcc_selection.currentText() == "3ds Max":
             if not self.connected_to_max:
                 self.set_up_dcc_connection()
             
             self.max.send_command(self.max.import_asset(file_path))
+
+        elif self.dcc_selection.currentText() == "Unreal Engine":
+            asset_name = Path(file_path).stem  # Get the asset name without extension
+            self.unreal.send_asset_to_unreal(asset_name, file_path)
+            return
 
         # log the asset pull in the database
         self.log_asset_action("pull", f"{Path(file_path).name}")
@@ -512,6 +531,7 @@ class AssetLibraryApp(QMainWindow):
         
 
     def submit_new_asset(self):
+        # check if a subcategory has been selected before proceeding with asset submission
         if self.new_asset_submission_directory == "":
             QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
             return
@@ -574,7 +594,7 @@ class AssetLibraryApp(QMainWindow):
             self.log_asset_action("push", f"{asset_name}.ma")
             self.log_asset_action("push", f"{asset_name}.fbx")
 
-        else:
+        elif self.dcc_selection.currentText() == "3ds Max":
             if not self.connected_to_max:
                 self.set_up_dcc_connection()
 
@@ -600,6 +620,14 @@ class AssetLibraryApp(QMainWindow):
             # log the asset submission to the database
             self.log_asset_action("push", f"{asset_name}.max")
             self.log_asset_action("push", f"{asset_name}.fbx")
+
+        elif self.dcc_selection.currentText() == "Unreal Engine":
+            if not self.connected_to_unreal:
+                self.set_up_dcc_connection()
+            # Unreal Engine integration is not implemented yet
+            print("Unreal Engine integration is not implemented yet.")
+            QMessageBox.information(self, "Not Implemented", "Exporting assets from Unreal Engine is not implemented yet.")
+            return
 
 
 
