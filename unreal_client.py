@@ -65,56 +65,38 @@ class UnrealClient:
             self.remote_exec.stop()
             self.remote_exec = None
 
-    def send_asset_to_unreal(self, asset_name, fbx_path, master_mat_path="/Game/Materials/M_Master"):
-        if not self.is_available():
-            print("attempted to send to unreal but remote_execution module is not available")
-            return
-        # This function sends an asset to Unreal Engine by importing the FBX file and applying the master material
+    def send_asset_to_unreal(self, asset_name, fbx_path, master_mat_path="/Game/Assets/M_AssetLibrary_Master"):
         fbx_path_obj = Path(fbx_path)
-        clean_fbx = fbx_path_obj.as_posix()  # Convert to POSIX path for Unreal
-        clean_tex_dir = (fbx_path_obj.parent / "Textures").as_posix()
+        clean_fbx = fbx_path_obj.as_posix()
+        clean_tex_dir = (fbx_path_obj.parent / "TEXTURES").as_posix()
+
         cmd = (
             "import unreal, json\n"
             "from pathlib import Path\n"
-            "def import_library_asset(asset_name, fbx_path, textures_dir, master_mat_path='/Game/Assets/M_AssetLibrary_Master'):\n"
+            "def import_library_asset(asset_name, fbx_path, textures_dir, master_mat_path):\n"
             "    base_dest = f'/Game/Assets/{asset_name}'\n"
             "    tex_dest = f'{base_dest}/Textures'\n"
             "    asset_tools = unreal.AssetToolsHelpers.get_asset_tools()\n"
             "    meta_file = Path(fbx_path).parent / 'metadata.json'\n"
-            "    channel_map = json.loads(meta_file.read_text()) if meta_file.exists() else {}\n"
+            "    meta_data = json.loads(meta_file.read_text()) if meta_file.exists() else {}\n"
+            "    materials_meta = meta_data.get('materials', {})\n"
             "    tex_tasks = []\n"
-            "    for tex_file in Path(textures_dir).glob('*.*'):\n"
-            "        task = unreal.AssetImportTask()\n"
-            "        task.filename = str(tex_file)\n"
-            "        task.destination_path = tex_dest\n"
-            "        task.automated = True\n"
-            "        task.save = True\n"
-            "        tex_tasks.append(task)\n"
+            "    if Path(textures_dir).exists():\n"
+            "        for tex_file in Path(textures_dir).glob('*.*'):\n"
+            "            if tex_file.is_file():\n"
+            "                task = unreal.AssetImportTask()\n"
+            "                task.filename = str(tex_file)\n"
+            "                task.destination_path = tex_dest\n"
+            "                task.automated = True\n"
+            "                task.save = True\n"
+            "                tex_tasks.append(task)\n"
             "    if tex_tasks:\n"
             "        asset_tools.import_asset_tasks(tex_tasks)\n"
-            "    mi_name = f'MI_{asset_name}'\n"
-            "    mi_factory = unreal.MaterialInstanceConstantFactoryNew()\n"
-            "    mi_asset = asset_tools.create_asset(mi_name, base_dest, unreal.MaterialInstanceConstant, mi_factory)\n"
-            "    master_mat = unreal.EditorAssetLibrary.load_asset(master_mat_path)\n"
-            "    if master_mat and mi_asset:\n"
-            "        mi_asset.set_editor_property('parent', master_mat)\n"
-            "        for channel, tex_filename in channel_map.items():\n"
-            "            tex_asset_path = f'{tex_dest}/{Path(tex_filename).stem}'\n"
-            "            tex_obj = unreal.EditorAssetLibrary.load_asset(tex_asset_path)\n"
-            "            if not tex_obj:\n"
-            "                continue\n"
-            "            if channel in ('Normal', 'Roughness', 'Metallic', 'AO'):\n"
-            "                tex_obj.set_editor_property('srgb', False)\n"
-            "                if channel == 'Normal':\n"
-            "                    tex_obj.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_NORMALMAP)\n"
-            "                unreal.EditorAssetLibrary.save_loaded_asset(tex_obj)\n"
-            "            unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value(mi_asset, channel, tex_obj)\n"
-            "        unreal.EditorAssetLibrary.save_loaded_asset(mi_asset)\n"
             "    fbx_options = unreal.FbxImportUI()\n"
             "    fbx_options.import_mesh = True\n"
             "    fbx_options.import_materials = False\n"
             "    fbx_options.import_textures = False\n"
-            "    fbx_options.static_mesh_import_data.combine_meshes = False\n" \
+            "    fbx_options.static_mesh_import_data.combine_meshes = False\n"
             "    fbx_options.static_mesh_import_data.build_nanite = True\n"
             "    mesh_task = unreal.AssetImportTask()\n"
             "    mesh_task.filename = str(fbx_path)\n"
@@ -123,15 +105,46 @@ class UnrealClient:
             "    mesh_task.save = True\n"
             "    mesh_task.options = fbx_options\n"
             "    asset_tools.import_asset_tasks([mesh_task])\n"
-            "    mesh_path = f'{base_dest}/{Path(fbx_path).stem}'\n"
-            "    static_mesh = unreal.EditorAssetLibrary.load_asset(mesh_path)\n"
-            "    if static_mesh and mi_asset:\n"
-            "        static_mesh.set_material(0, mi_asset)\n"
+            "    master_mat = unreal.EditorAssetLibrary.load_asset(master_mat_path)\n"
+            "    if not master_mat:\n"
+            "        unreal.log_error(f'Master Material not found at: {master_mat_path}')\n"
+            "        return\n"
+            "    mi_factory = unreal.MaterialInstanceConstantFactoryNew()\n"
+            "    imported_paths = mesh_task.get_editor_property('imported_object_paths') or []\n"
+            "    if not imported_paths:\n"
+            "        unreal.log_error(f'No meshes were imported from: {fbx_path}')\n"
+            "        return\n"
+            "    for obj_path in imported_paths:\n"
+            "        static_mesh = unreal.EditorAssetLibrary.load_asset(obj_path)\n"
+            "        if not isinstance(static_mesh, unreal.StaticMesh):\n"
+            "            continue\n"
+            "        static_materials = static_mesh.get_editor_property('static_materials')\n"
+            "        for slot_index, static_mat in enumerate(static_materials):\n"
+            "            slot_name = str(static_mat.material_slot_name)\n"
+            "            mi_name = f'MI_{asset_name}_{slot_name}'\n"
+            "            mi_path = f'{base_dest}/{mi_name}'\n"
+            "            mi_asset = unreal.EditorAssetLibrary.load_asset(mi_path)\n"
+            "            if not mi_asset:\n"
+            "                mi_asset = asset_tools.create_asset(mi_name, base_dest, unreal.MaterialInstanceConstant, mi_factory)\n"
+            "            if mi_asset:\n"
+            "                mi_asset.set_editor_property('parent', master_mat)\n"
+            "                slot_textures = materials_meta.get(slot_name, {})\n"
+            "                for channel, tex_filename in slot_textures.items():\n"
+            "                    tex_obj = unreal.EditorAssetLibrary.load_asset(f'{tex_dest}/{Path(tex_filename).stem}')\n"
+            "                    if tex_obj:\n"
+            "                        if channel in ('Normal', 'Roughness', 'Metallic', 'AO'):\n"
+            "                            tex_obj.set_editor_property('srgb', False)\n"
+            "                            if channel == 'Normal':\n"
+            "                                tex_obj.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_NORMALMAP)\n"
+            "                            unreal.EditorAssetLibrary.save_loaded_asset(tex_obj)\n"
+            "                        unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value(mi_asset, channel, tex_obj)\n"
+            "                        unreal.MaterialEditingLibrary.set_material_instance_static_switch_parameter_value(mi_asset, f'Use_{channel}_Map', True)\n"
+            "                unreal.EditorAssetLibrary.save_loaded_asset(mi_asset)\n"
+            "                static_mesh.set_material(slot_index, mi_asset)\n"
             "        unreal.EditorAssetLibrary.save_loaded_asset(static_mesh)\n"
-            f"import_library_asset('{asset_name}', '{clean_fbx}', '{clean_tex_dir}')\n"
+            f"import_library_asset('{asset_name}', '{clean_fbx}', '{clean_tex_dir}', '{master_mat_path}')\n"
         )
 
-        # print the cleaned path before sending, then pass the command string to the send_command function
         print(f"Sending import command to Unreal for: {clean_fbx}")
         response = self.send_command(cmd)
         return response
