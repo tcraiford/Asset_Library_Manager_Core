@@ -302,9 +302,9 @@ class AssetLibraryApp(QMainWindow):
         self.dcc_selection.addItems(['Maya', '3ds Max'])
         self.dcc_selection.currentIndexChanged.connect(lambda i: self.clear_all_lists())
         control_button_layout.addWidget(self.dcc_selection)
-        test_button = QPushButton("Function Test")
-        control_button_layout.addWidget(test_button)
-        test_button.clicked.connect(self.do_function_test)
+        #test_button = QPushButton("Function Test")
+        #control_button_layout.addWidget(test_button)
+        #test_button.clicked.connect(self.do_function_test)
         submit_new_asset_button = QPushButton("Submit Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
@@ -474,17 +474,42 @@ class AssetLibraryApp(QMainWindow):
     def archive_texture_files(self, asset_directory):
         textures_folder = asset_directory / "TEXTURES"
         backup_folder = textures_folder / "BACKUP"
-        # delete backup_folder if it exists for the asset then create a new empty one
-        if backup_folder.exists():
-            shutil.rmtree(backup_folder)
+        tmp_folder = textures_folder / "tmp"
+
+        # Guardrail: Wait up to 3 seconds for Maya/Max socket to finish writing to tmp
+        for _ in range(30):
+            if tmp_folder.exists() and any(tmp_folder.iterdir()):
+                break
+            time.sleep(0.1)
+
+        # Do NOT archive existing textures if tmp has nothing in it
+        if not tmp_folder.exists() or not any(tmp_folder.iterdir()):
+            print("Warning: tmp folder is empty. Aborting archive so TEXTURES is not wiped.")
+            return
+
+        textures_folder.mkdir(parents=True, exist_ok=True)
         backup_folder.mkdir(parents=True, exist_ok=True)
 
-        # copy all contents of TEXTURES folder that are not a directory into backup_folder
+        # 1. Clear contents of BACKUP safely (avoids WinError 32)
+        for old_backup in backup_folder.iterdir():
+            if old_backup.is_file() or old_backup.is_symlink():
+                old_backup.unlink()
+            elif old_backup.is_dir():
+                shutil.rmtree(old_backup)
+
+        # 2. Move existing files in TEXTURES into BACKUP
         for item in textures_folder.iterdir():
-            if item == backup_folder:
+            if item in (backup_folder, tmp_folder):
                 continue
             if not item.is_dir() and not item.is_symlink():
-                shutil.move(item, backup_folder)        
+                shutil.move(str(item), str(backup_folder / item.name))
+
+        # 3. Promote staged files from tmp into TEXTURES and remove tmp
+        for staged_file in tmp_folder.iterdir():
+            if staged_file.is_file():
+                shutil.move(str(staged_file), str(textures_folder / staged_file.name))
+        tmp_folder.rmdir()
+        
 
     def submit_new_asset(self):
         if self.new_asset_submission_directory == "":
@@ -498,17 +523,16 @@ class AssetLibraryApp(QMainWindow):
         if not result:
             return
 
-        asset_directory = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
-        asset_directory_name_fbx = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.fbx"
-        asset_directory_name_ma = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.ma"
-        asset_directory_name_max = asset_directory / f"{submission_dialog.new_asset_name_submission.text()}.max"
+        asset_name = submission_dialog.new_asset_name_submission.text()
+        asset_directory = self.new_asset_submission_directory / asset_name
+        asset_directory_name_fbx = asset_directory / f"{asset_name}.fbx"
+        asset_directory_name_ma = asset_directory / f"{asset_name}.ma"
+        asset_directory_name_max = asset_directory / f"{asset_name}.max"
+        textures_folder = asset_directory / "TEXTURES"
 
-        
         if self.dcc_selection.currentText() == "Maya":
             if not self.connected_to_maya:
                 self.set_up_dcc_connection()
-
-
 
             # zoom extents of selection in Maya
             self.maya.send_command("cmds.viewFit()")
@@ -516,28 +540,15 @@ class AssetLibraryApp(QMainWindow):
             # send script folder to Maya default location for texture collection
             self.send_script_to_maya_default_folder()
 
-            # exporting files from Maya to the new directory
+            # 1. Stage textures into TEXTURES/tmp and repath Maya file nodes to TEXTURES/
+            self.maya.send_command(self.maya.collect_textures(textures_folder))
+
+            # 2. Empty BACKUP, move old TEXTURES to BACKUP, and promote tmp to TEXTURES
+            self.archive_texture_files(asset_directory)
+
+            # 3. Export files AFTER textures are in place and materials are repathed
             self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name_fbx))
             self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name_ma))
-
-            # collect textures first and put them into tmp folder. Move any existing textures into BACKUP. Then move tmp folder contents into TEXTURES root            
-            textures_folder = asset_directory / "TEXTURES"
-            tmp_folder = textures_folder / "tmp"
-            tmp_folder.mkdir(parents=True, exist_ok=True)
-            # call collect_textures to tmp folder first, then archive contents of root TEXTURES, then call collect_textures to root TEXTURES folder
-            # do this because maya will fail to map materials to texture files if they're not currently in the directory you're mapping to
-            self.maya.send_command(self.maya.collect_textures(tmp_folder))
-            self.archive_texture_files(asset_directory)
-            self.maya.send_command(self.maya.collect_textures(textures_folder))
-            for attempt in range(5): # attempts to delete the folder 5 times allowing for a slight pause so that Maya has enough time to complete its screen refresh and unlock the textures in tmp
-                try:
-                    shutil.rmtree(tmp_folder)
-                    break
-                except:
-                    time.sleep(0.3) # wait 300 miliseconds and try to delete the tmp_folder again
-
-
-
 
             # get the project directory for Maya where the thumbnail will be rendered to
             maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
@@ -548,22 +559,20 @@ class AssetLibraryApp(QMainWindow):
             self.maya.send_command(self.maya.delete_ambient_light())
 
             # move the rendered thumbnail from the Maya project directory to the new asset folder
-            # first get the open maya file name because that is what the image will be named
             maya_file_name = Path(self.maya.send_command(self.maya.get_file_name())).stem
-            if maya_file_name == "": # if the project is unsaved, the get_file_name() method returns nothing and the render will be saved as "untitled"
+            if maya_file_name == "":
                 maya_file_name = "untitled"
             maya_file_name = f"{maya_file_name}.jpg"
             thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / maya_file_name
-            thumbnail_destination = self.new_asset_submission_directory / submission_dialog.new_asset_name_submission.text()
-            target_thumbnail_path = thumbnail_destination / "thumbnail.jpg"
-            shutil.move(thumbnail_source, target_thumbnail_path)
+            target_thumbnail_path = asset_directory / "thumbnail.jpg"
+            shutil.move(str(thumbnail_source), str(target_thumbnail_path))
 
             # refresh the sub_subcategory_list to show the new asset folder
             self.load_sub_subcategories()
 
             # log the asset submission to the database
-            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.ma")
-            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.fbx")
+            self.log_asset_action("push", f"{asset_name}.ma")
+            self.log_asset_action("push", f"{asset_name}.fbx")
 
         else:
             if not self.connected_to_max:
@@ -572,39 +581,26 @@ class AssetLibraryApp(QMainWindow):
             # zoom extents of selection in Max
             self.max.send_command(self.max.zoom_extents())
 
+            # 1. Stage textures into TEXTURES/tmp and repath Max materials to TEXTURES/
+            self.max.send_command(self.max.collect_textures(textures_folder))
+
+            # 2. Empty BACKUP, move old TEXTURES to BACKUP, and promote tmp to TEXTURES
+            self.archive_texture_files(asset_directory)
+
+            # 3. Export files AFTER textures are in place and materials are repathed
             self.max.send_command(self.max.export_selected_as_fbx(asset_directory_name_fbx))
             self.max.send_command(self.max.export_selected_as_max(asset_directory_name_max))
 
-            # command being used automatically overwrites files with the same name and also takes
-            # file path's as an argument for where to save the image
-            # self.max.render_thumbnail() adds the "thumbnail.jpg" to the end of the directory
+            # Render thumbnail directly to asset_directory/thumbnail.jpg
             self.max.send_command(self.max.render_thumbnail(asset_directory))
-
-
-            textures_folder = asset_directory / "TEXTURES"
-
-            self.max.send_command(self.max.collect_textures(textures_folder))
-            print("moved all files to tmp folder")
-
-            self.archive_texture_files(asset_directory)
-            print("archived old texture files")
-
-            # move files from tmp folder to root of TEXTURES folder
-
-            tmp_folder = textures_folder / "tmp"
-            for item in tmp_folder.iterdir():
-                shutil.move(str(item), str(textures_folder / item.name))
-            print("moved new files from tmp to textures root")
-
-            tmp_folder.rmdir()
-            print("deleted tmp folder")
 
             # refresh the sub_subcategory_list to show the new asset folder
             self.load_sub_subcategories()
 
             # log the asset submission to the database
-            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.max")
-            self.log_asset_action("push", f"{submission_dialog.new_asset_name_submission.text()}.fbx")
+            self.log_asset_action("push", f"{asset_name}.max")
+            self.log_asset_action("push", f"{asset_name}.fbx")
+
 
 
 

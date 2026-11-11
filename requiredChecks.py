@@ -22,3 +22,5 @@ def check_required_libraries():
             sys.exit()
         else:
             sys.exit("Exiting program. Please install the missing libraries and try again.")
+
+    print("Library check complete. All required libraries are installed. Continuing with the program...")
