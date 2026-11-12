@@ -362,8 +362,8 @@ class AssetLibraryApp(QMainWindow):
         gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
         gear_menu.addAction("Create New Library", self.create_starting_library)
         gear_menu.addAction("Temporarily Change Library Directory", self.change_directory)
-        gear_menu.addAction("Audit Artist Submissions", self.audit_artist_submissions)
-        gear_menu.addAction("Audit Asset Submissions", self.audit_asset_submissions)
+        gear_menu.addAction("Audit Artist Actions", self.audit_artist_submissions)
+        gear_menu.addAction("Audit Asset Actions", self.audit_asset_submissions)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
@@ -449,7 +449,7 @@ class AssetLibraryApp(QMainWindow):
                 if msg_box.clickedButton() == continue_button:
                     self.connected_to_max = True
 
-        elif self.dcc_selection.currentText() == "Uneal Engine":
+        elif self.dcc_selection.currentText() == "Unreal Engine":
             if not self.connected_to_unreal:
                 msg_box = QMessageBox()
                 msg_box.setWindowTitle("Unreal Engine Connection Setup")
@@ -482,9 +482,10 @@ class AssetLibraryApp(QMainWindow):
             self.max.send_command(self.max.import_asset(file_path))
 
         elif self.dcc_selection.currentText() == "Unreal Engine":
+            if not self.connected_to_unreal:
+                self.set_up_dcc_connection()
             asset_name = Path(file_path).stem  # Get the asset name without extension
             self.unreal.send_asset_to_unreal(asset_name, file_path)
-            return
 
         # log the asset pull in the database
         self.log_asset_action("pull", f"{Path(file_path).name}")
