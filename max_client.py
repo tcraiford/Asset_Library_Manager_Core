@@ -45,7 +45,7 @@ class MaxClient:
 
     def export_selected_as_max(self, file_path: str) -> str:
             clean_path = Path(file_path).as_posix()
-            cmd = f'from pymxs import runtime as rt\nrt.saveMaxFile("{clean_path}", selectedOnly=True)'
+            cmd = f'from pymxs import runtime as rt\nrt.saveNodes(rt.selection, "{clean_path}", quiet=True)'
             return cmd
 
     def export_selected_as_fbx(self, file_path: str) -> str:
