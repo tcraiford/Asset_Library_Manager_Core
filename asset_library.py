@@ -306,9 +306,10 @@ class AssetLibraryApp(QMainWindow):
         self.dcc_selection.addItems(['Maya', '3ds Max', 'Unreal Engine'])
         self.dcc_selection.currentIndexChanged.connect(lambda i: self.clear_all_lists())
         control_button_layout.addWidget(self.dcc_selection)
-        #test_button = QPushButton("Function Test")
-        #control_button_layout.addWidget(test_button)
-        #test_button.clicked.connect(self.do_function_test)
+        self.create_new_subcategory_button = QPushButton("Create Subcategory")
+        control_button_layout.addWidget(self.create_new_subcategory_button)
+        self.create_new_subcategory_button.clicked.connect(self.create_new_subcategory)
+        self.create_new_subcategory_button.setVisible(False)  # Initially hidden, will be shown after password verification
         submit_new_asset_button = QPushButton("Submit Asset")
         control_button_layout.addWidget(submit_new_asset_button)
         submit_new_asset_button.clicked.connect(self.submit_new_asset)
@@ -327,8 +328,9 @@ class AssetLibraryApp(QMainWindow):
         self.directory_line.setText(self.library_path)
         # innitialize the directory. Without this, the lists will remain blank until set_base_directory is called later
         self.set_base_directory()
-        open_dir_button = QPushButton("Open Library")
-        open_dir_button.clicked.connect(self.open_directory)
+        self.open_dir_button = QPushButton("Open Library")
+        self.open_dir_button.setVisible(False)  # Initially hidden, will be shown after password verification
+        self.open_dir_button.clicked.connect(self.open_directory)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -342,7 +344,7 @@ class AssetLibraryApp(QMainWindow):
         # create the directory line layout
         dir_layout = QHBoxLayout()
         dir_layout.addWidget(self.directory_line)
-        dir_layout.addWidget(open_dir_button)
+        dir_layout.addWidget(self.open_dir_button)
 
         # define the positioning of content on the main_layout tool
         main_layout.addWidget(description)
@@ -359,11 +361,17 @@ class AssetLibraryApp(QMainWindow):
         #dropdown menu options
         gear_menu = QMenu(self)
         # add gear_menu functions here. Format is string for displayed menu option and then the function
-        gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
-        gear_menu.addAction("Create New Library", self.create_starting_library)
-        gear_menu.addAction("Temporarily Change Library Directory", self.change_directory)
         gear_menu.addAction("Audit Artist Actions", self.audit_artist_submissions)
         gear_menu.addAction("Audit Asset Actions", self.audit_asset_submissions)
+
+        self.admin_access_action = gear_menu.addAction("Admin Access", self.check_admin_access)
+        self.admin_access_action.setVisible(True)  # Initially visible, will be hidden after password verification
+        self.create_library_action = gear_menu.addAction("Create New Library", self.create_starting_library)
+        self.create_library_action.setVisible(False)  # Initially hidden, will be shown after password verification
+        self.change_directory_action = gear_menu.addAction("Change Library Directory", self.change_directory)
+        self.change_directory_action.setVisible(False)  # Initially hidden, will be shown after password verification
+
+        gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
         # tells the gear_button that the menu it is pulling content from is named gear_menu
         self.gear_button.setMenu(gear_menu)
         # position the gear_button top right always
@@ -464,6 +472,28 @@ class AssetLibraryApp(QMainWindow):
                     self.connected_to_unreal = True
 
 
+    def create_new_subcategory(self):
+        # check if a main category has been selected before allowing the user to create a new subcategory
+        if self.category_list.currentItem() is None:
+            QMessageBox.warning(self, "No Category Selected", "Please select a main category before creating a new subcategory.")
+            return
+
+        # get the selected main category
+        selected_category = self.category_list.currentItem()
+        selected_category_path = Path(selected_category.data(100)) # retrieve the stored path from the item data using the role 100
+
+        # prompt the user for the new subcategory name
+        new_subcategory_name, ok = QInputDialog.getText(self, "Create New Subcategory", "Enter the name of the new subcategory:")
+
+        if not ok or not new_subcategory_name:
+            return
+
+        # create the new subcategory directory
+        new_subcategory_path = selected_category_path / new_subcategory_name.strip()
+        new_subcategory_path.mkdir(parents=True, exist_ok=True)
+
+        # refresh the subcategory list to show the newly created subcategory
+        self.load_subcategories()
 
     def open_asset_in_scene(self):
         file_path = self.get_selected_asset_path()
@@ -728,6 +758,13 @@ class AssetLibraryApp(QMainWindow):
             if dialog.get_password() == self.HARDCODED_PASSWORD:
                 self.is_admin = True
                 QMessageBox.information(self, "Access Granted", "You have access to the admin features.")
+
+                # set admin features to be visible now that the password has been entered correctly
+                self.admin_access_action.setVisible(False)
+                self.open_dir_button.setVisible(True)
+                self.create_library_action.setVisible(True)
+                self.change_directory_action.setVisible(True)
+                self.create_new_subcategory_button.setVisible(True)
                 return True
             else:
                 QMessageBox.critical(self, "Incorrect Password", "The password entered is incorrect.")
