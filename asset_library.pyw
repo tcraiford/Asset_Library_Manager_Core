@@ -1,0 +1,1044 @@
+import getpass
+import os
+import ctypes
+import shutil
+import sys
+import configparser
+import time
+import sqlite3
+
+from datetime import datetime
+from Classes.maya_client import MayaClient
+from Classes.max_client import MaxClient
+from Classes.unreal_client import UnrealClient
+from Classes.requiredChecks import check_required_libraries
+check_required_libraries()
+
+
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QInputDialog, QMainWindow, QWidget, QVBoxLayout, QPushButton,
+                               QToolButton, QLabel, QLineEdit, QMessageBox, QDialog, QListWidget, QListWidgetItem,
+                               QMenu, QComboBox)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import (QPixmap, QIcon)
+from pathlib import Path
+
+
+
+# creates a basic starting library to be built upon. This is a starting point for the asset library
+def create_starting_library(base_directory_path):
+    subfolders = []
+
+    starting_library_path = Path(__file__).resolve().parent / "Settings" / "starting_library.txt"
+    # opens starting_library.txt and saves each line as a new directory to be created
+    with open(starting_library_path, 'r') as file:
+        # open the file and read only one line at a time
+        for line in file:
+            # check if the line is blank
+            if line.strip():
+                # if it has text, strip the newline from the end and add it to the list
+                subfolders.append(line.strip())
+
+    
+    base_directory_path = Path(base_directory_path)
+
+    for folder in subfolders:
+        full_path = base_directory_path / "Asset_Library" / folder
+        full_path.mkdir(parents=True, exist_ok=True)
+    
+    return base_directory_path
+
+
+def get_folders_in_directory(dir_path):
+    dir_path = Path(dir_path)
+    folders =  [f for f in dir_path.iterdir() if f.is_dir()]
+    return folders
+
+# create the asset submission window that pops up when the user clicks "Submit New Asset"
+class AssetSubmissionDialog(QDialog):
+    # accepts the target path as an argument so it can be used to create the new asset folder in the correct location
+    def __init__(self, target_path: Path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Submit New Asset")
+        self.maya = MayaClient()
+
+        self.new_asset_dir = target_path
+
+        confirmation_buttons = QHBoxLayout()
+        submit_button = QPushButton("Submit")
+        submit_button.clicked.connect(self.submit_asset)
+        confirmation_buttons.addWidget(submit_button)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.cancel_submission)
+        confirmation_buttons.addWidget(cancel_button)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Target Directory: {self.new_asset_dir}"))
+        self.new_asset_name_submission = QLineEdit(placeholderText="Enter new asset name here...")
+        layout.addWidget(self.new_asset_name_submission)
+        layout.addLayout(confirmation_buttons)
+
+
+    def cancel_submission(self):
+        self.reject()
+
+    # creates the folders for the new asset submission and handles the archival process
+    def submit_asset(self):
+        # setup base directory paths cleanly
+        submission_text = self.new_asset_name_submission.text()
+        new_asset_folder = self.new_asset_dir / submission_text
+        
+        new_asset_archive_folder = new_asset_folder / "ARCHIVE"
+        new_asset_textures_folder = new_asset_folder / "TEXTURES"
+        
+        # Create folders safely
+        new_asset_archive_folder.mkdir(parents=True, exist_ok=True)
+        new_asset_textures_folder.mkdir(parents=True, exist_ok=True)
+        
+        file_types = [".fbx", ".ma", ".max"]
+        archival_check = False
+        
+        # loop through extensions to find target files inside the folder
+        for ext in file_types:
+            target_file = new_asset_folder / f"{submission_text}{ext}"
+            
+            if target_file.exists():
+                # prompts the user for archival approval only once per submission otherwise it prompts per fbx, ma, or max file it sees
+                if archival_check == False:
+                    response_to_archival = self.prompt_archival()
+                    archival_check = True
+                
+                if response_to_archival:
+                    # handle version incrementing for archives
+                    counter = 1
+                    archived_file_name = f"ARCHIVE_{submission_text}_{counter:03d}{ext}"
+                    existing_asset_destination = new_asset_archive_folder / archived_file_name
+                    
+                    while existing_asset_destination.exists():
+                        counter += 1
+                        archived_file_name = f"ARCHIVE_{submission_text}_{counter:03d}{ext}"
+                        existing_asset_destination = new_asset_archive_folder / archived_file_name
+                    
+                    # move the file safely using path objects
+                    shutil.move(str(target_file), str(existing_asset_destination))
+                    
+                else:
+                    # cancel submission immediately if user declines archiving
+                    QMessageBox.warning(self, "Choose a New Name", "Please choose a different name for the asset submission and try again.")
+                    return
+
+        self.accept()
+
+    def prompt_archival(self):
+        # if asset name already exists, this will prompt if they want to Archive the existing version and submit a new version
+        archive_prompt_box = QMessageBox(self)
+
+        archive_prompt_box.setIcon(QMessageBox.Icon.Question)
+        archive_prompt_box.setWindowTitle("Archive Existing?")
+        archive_prompt_box.setText("Asset already exists. Do you want to archive the existing file and create a new version?")
+
+        # create the buttons
+        archive_prompt_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        # default highlight button no to avoid accidental archival
+        archive_prompt_box.setDefaultButton(QMessageBox.StandardButton.No)
+
+        response = archive_prompt_box.exec()
+
+        # response is either QMessageBox.StandardButton.Yes or No. If it is Yes, then this will evaluate as True, thus prompt_archival() returns True if user selects Yes button
+        return response == QMessageBox.StandardButton.Yes
+
+
+
+# create a passwrod dialog box that can pop up when protected actions are attempted by user
+class PasswordDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Password Required")
+        self.resize(300, 100)
+
+        # make the dialog box the only thing the user can interact with until closed
+        #self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        # create the layout for the password box
+        layout = QVBoxLayout()
+
+        # create the pieces that go into the password box
+        self.label = QLabel("Please enter the password to proceed")
+        layout.addWidget(self.label)
+
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Enter password here...")
+        layout.addWidget(self.password_input)
+
+        self.submit_button = QPushButton("Submit")
+
+        self.password_input.returnPressed.connect(self.submit_button.click)
+        self.submit_button.clicked.connect(self.accept)
+        layout.addWidget(self.submit_button)
+
+        self.setLayout(layout)
+
+    def get_password(self):
+        return self.password_input.text()
+
+class DBAuditDialog(QDialog): # Class to create a dialog window for auditing the database
+    def __init__(self, db_path, search_type, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Artist Submission Search")
+        self.resize(600, 400)
+
+        layout = QVBoxLayout()
+
+        self.audit_list = QListWidget()
+        layout.addWidget(self.audit_list)
+
+        self.setLayout(layout)
+
+        self.load_audit_data(db_path, search_type)
+        # call the method upon initialization so that the list window is opened and the method gets executed.
+        # Trying to do them separate causes the list window to open but the method doesn't get executed and the list window is blank.
+        # This way, the method is called as soon as the dialog window opens and the list gets populated with the queried data from the database
+
+    def load_audit_data(self, db_path, search_type): # open the database and read the asset_log table at given directory and intake name of artist being searched for
+        # get the artist name to search for
+        query, ok = QInputDialog.getText(self, "Search", f"Enter the {search_type} name to search for:")
+
+        if ok and query.strip(): # if the user clicked OK and entered a non-empty artist name, load the audit data
+
+            self.audit_list.clear() # clear the list widget before loading new data
+            
+            try: # attempt to connect. Timeout after 15 seconds to avoid "database is locked" errors when multiple users are trying to log at the same time
+                conn = sqlite3.connect(str(db_path), timeout=15)
+                cursor = conn.cursor()
+
+                if search_type == "artist":
+                    cursor.execute("SELECT * FROM asset_log WHERE artist = ? ORDER BY timestamp DESC", (query,)) # query the database for all entries by the specified artist, ordered by timestamp in descending order
+                elif search_type == "asset":
+                    cursor.execute("SELECT * FROM asset_log WHERE asset_name LIKE ? ORDER BY timestamp DESC", ((f"{query}.%"),)) # query the database for any files that have the asset name. The LIKE and the .% allow the code to show all file types, including fbx, ma, and max
+                rows = cursor.fetchall()
+
+                for row in rows: # unpack the tuple returned from the database and format it into a string to be displayed in the list widget
+                    timestamp, artist, action, asset_name = row[1], row[2], row[3], row[4] # assign each column to a variable for clarity
+                    item_text = f"{timestamp} | {artist} | {action} | {asset_name}" # create a string with the querried data to be displayed in the list widget
+                    self.audit_list.addItem(item_text) # add the string to the list widget
+            except sqlite3.Error as e:
+                QMessageBox.critical(self, "Database Error", f"An error occurred while accessing the database: {e}")
+
+            finally:
+                conn.close()
+        else:
+            return # if the user clicked Cancel or entered an empty artist name, do nothing and return to the main window
+
+class AssetLibraryApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Asset Library Manager")
+        self.resize(500, 600)
+        self.current_directory = ""
+
+        # the directory where a new asset would be created. Assigned in the subcategory_list selection method
+        self.new_asset_submission_directory = ""
+
+        # selected asset in asset list
+        self.asset_list_selection = ""
+
+        # the list of geometry files found inside sub_subcategory_list
+        self.geometry_file_list = []
+        # directory of the thumbnail for the selected asset in sub_subcategory_list
+        self.thumbnail_dir = ""
+
+        # Instantiate the MayaClient to manage communication with Maya
+        # this creates an object called self.maya that can be used to send commands to Maya. It is an instance of the MayaClient class defined in maya_client.py
+        self.maya = MayaClient()
+        # Flag to track connection status with Maya
+        self.connected_to_maya = False  
+
+        self.max = MaxClient()
+
+        self.connected_to_max = False
+
+        self.unreal = UnrealClient()
+        self.connected_to_unreal = False
+
+        # password protection for some actions
+        self.HARDCODED_PASSWORD = "0000"
+        self.is_admin = False
+
+        # setting up the category lists
+        self.category_list = QListWidget()
+        self.subcategory_list = QListWidget()
+        self.sub_subcategory_list = QListWidget()
+        self.asset_folder_contents_list = QListWidget()
+        # When a user selects a main category, run the "load_subcategories" method
+        # this is just another activation, similar to clicked for a button widget
+        self.category_list.itemSelectionChanged.connect(self.load_subcategories)
+        # when a user selects a subcategory from the subcategory list, load the sub_subcategories
+        self.subcategory_list.itemSelectionChanged.connect(self.load_sub_subcategories)
+        # when a user selects an asset folder in the sub_subcategory list, walk and load the contents of that asset folder
+        self.sub_subcategory_list.itemSelectionChanged.connect(self.load_asset_folder_contents)
+        # when a user selects an asset listed in the asset's folder
+        self.asset_folder_contents_list.itemClicked.connect(self.get_selected_asset_path)
+
+        # category list layout
+        list_layout = QHBoxLayout()
+        list_layout.addWidget(self.category_list)
+        list_layout.addWidget(self.subcategory_list)
+        list_layout.addWidget(self.sub_subcategory_list)
+
+        # asset folder contents and info layout to be nested inside asset folder contents layout
+        asset_info_layout = QVBoxLayout()
+        asset_info_layout.addWidget(self.asset_folder_contents_list)
+        self.asset_info = QLabel("Asset Info: \n\n\n\nSelect an asset to see its info here.")
+        asset_info_layout.addWidget(self.asset_info)
+
+        # asset folder contents layout
+        asset_options_layout = QHBoxLayout()
+        asset_options_layout.addLayout(asset_info_layout)
+        # asset_options_layout.addWidget(self.asset_folder_contents_list)
+        # create and add the thumbnail
+        self.preview_thumbnail = QLabel()
+        # makes sure the thumbnail scales properly
+        self.preview_thumbnail.setScaledContents(True)
+        self.preview_thumbnail.setFixedSize(256, 256)
+        asset_options_layout.addWidget(self.preview_thumbnail)
+
+        # Control button layout
+        control_button_layout = QHBoxLayout()
+        self.dcc_selection = QComboBox()
+        self.dcc_selection.addItems(['Maya', '3ds Max', 'Unreal Engine'])
+        self.dcc_selection.currentIndexChanged.connect(lambda i: self.clear_all_lists())
+        control_button_layout.addWidget(self.dcc_selection)
+        self.create_new_subcategory_button = QPushButton("Create Subcategory")
+        control_button_layout.addWidget(self.create_new_subcategory_button)
+        self.create_new_subcategory_button.clicked.connect(self.create_new_subcategory)
+        self.create_new_subcategory_button.setVisible(False)  # Initially hidden, will be shown after password verification
+        submit_new_asset_button = QPushButton("Submit Asset")
+        control_button_layout.addWidget(submit_new_asset_button)
+        submit_new_asset_button.clicked.connect(self.submit_new_asset)
+        send_asset_to_scene_button = QPushButton("Open Asset")
+        control_button_layout.addWidget(send_asset_to_scene_button)
+        send_asset_to_scene_button.clicked.connect(self.open_asset_in_scene)
+
+
+        self.directory_line = QLineEdit()
+        self.directory_line.setPlaceholderText("Enter the base directory path here...")
+        self.directory_line.setReadOnly(True)
+        self.directory_line.returnPressed.connect(self.set_base_directory)
+        '''create self variable to hold library from settings.ini and then next line
+        sets it into the directory_line'''
+        self.library_path = self.settings_pull()
+        self.directory_line.setText(self.library_path)
+        # innitialize the directory. Without this, the lists will remain blank until set_base_directory is called later
+        self.set_base_directory()
+        self.open_dir_button = QPushButton("Open Library")
+        self.open_dir_button.setVisible(False)  # Initially hidden, will be shown after password verification
+        self.open_dir_button.clicked.connect(self.open_directory)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        #layout main_layout is where all the individual widgets and row/collum layouts get added to
+        main_layout = QVBoxLayout(central_widget)
+
+        # create a label to be shown at the top of the tool
+        description = QLabel("Created by Taylor Raiford: V1.0")
+
+        # create the directory line layout
+        dir_layout = QHBoxLayout()
+        dir_layout.addWidget(self.directory_line)
+        dir_layout.addWidget(self.open_dir_button)
+
+        # define the positioning of content on the main_layout tool
+        main_layout.addWidget(description)
+        main_layout.addLayout(dir_layout)
+        main_layout.addLayout(control_button_layout)
+        main_layout.addLayout(list_layout)
+        main_layout.addLayout(asset_options_layout)
+
+        # add gear icon on top right
+        self.gear_button = QToolButton(self)
+        self.gear_button.setText("⚙")
+        self.gear_button.setPopupMode(QToolButton.InstantPopup)
+
+        #dropdown menu options
+        gear_menu = QMenu(self)
+        # add gear_menu functions here. Format is string for displayed menu option and then the function
+        gear_menu.addAction("Audit Artist Actions", self.audit_artist_submissions)
+        gear_menu.addAction("Audit Asset Actions", self.audit_asset_submissions)
+
+        self.admin_access_action = gear_menu.addAction("Admin Access", self.check_admin_access)
+        self.admin_access_action.setVisible(True)  # Initially visible, will be hidden after password verification
+        self.create_library_action = gear_menu.addAction("Create New Library", self.create_starting_library)
+        self.create_library_action.setVisible(False)  # Initially hidden, will be shown after password verification
+        self.change_directory_action = gear_menu.addAction("Change Library Directory", self.change_directory)
+        self.change_directory_action.setVisible(False)  # Initially hidden, will be shown after password verification
+
+        gear_menu.addAction("Connect to DCC", self.set_up_dcc_connection)
+        # tells the gear_button that the menu it is pulling content from is named gear_menu
+        self.gear_button.setMenu(gear_menu)
+        # position the gear_button top right always
+        self.position_gear_button()
+
+
+    # gets the default maya scripts folder directory
+    def get_maya_scripts_dir(self):
+        home = Path.home()
+
+        if os.name =='nt': # Windows
+            return home / "Documents" / "maya" / "scripts"
+
+        elif os.sys.platform == 'darwin':  # macOS
+            return home / "Library" / "Preferences" / "Autodesk" / "maya" / "scripts"
+        
+        else:  # Linux
+            return home / "maya" / "scripts"
+
+    # copies the maya_scripts file to the default maya script folder
+    def send_script_to_maya_default_folder(self):
+        # maya's default script directory
+            script_dir = self.get_maya_scripts_dir()
+            # what the file would be called if it already exists in the default directory
+            possible_script_dir = script_dir / "maya_scripts.py"
+            # directory of THIS file and all the extra bits
+            program_dir = Path(__file__).resolve().parent / "DCC_Scripts" / "maya_scripts.py"
+    
+            # if the maya_scripts.py file isn't in the main scripts folder, put a copy there
+            if not possible_script_dir.is_file():
+                script_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(program_dir, script_dir)
+
+
+    def do_function_test(self):
+        if self.dcc_selection.currentText() == "Maya":
+            print('maya function test button pressed')
+            self.send_script_to_maya_default_folder()
+            self.maya.send_command(self.maya.test_button())
+
+        else:
+            print("max function test button pressed")
+            self.max.send_command(self.max.create_cube())
+
+
+    def set_up_dcc_connection(self):
+        if self.dcc_selection.currentText() == "Maya":
+            # check if already connected to Maya. If so, do a fresh test of the connection and if it is still good, 
+            # tell the user they are already connected. If not, go through the connection process again.
+            if not self.connected_to_maya:
+                
+                # create a message box to tell user to set up connection on Maya side
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Maya Connection Setup")
+                msg_box.setText("Please launch Maya and open the port for communication.\nPress 'Continue' once Maya is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    print("Testing connection...")
+                    self.maya.test_maya_connection()
+                else:
+                    print("User canceled the operation.")
+                    return
+
+                if self.maya.test_maya_connection():
+                    self.connected_to_maya = True
+
+        elif self.dcc_selection.currentText() == "3ds Max":
+            if not self.connected_to_max:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Max Connection Setup")
+                msg_box.setText("Please launch Max and open the port for communication.\nPress 'Continue' once Max is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    self.connected_to_max = True
+
+        elif self.dcc_selection.currentText() == "Unreal Engine":
+            if not self.connected_to_unreal:
+                msg_box = QMessageBox()
+                msg_box.setWindowTitle("Unreal Engine Connection Setup")
+                msg_box.setText("Verify that Unreal Engine is running and ready for communication.\nPress 'Continue' once Unreal Engine is ready.")
+                msg_box.setIcon(QMessageBox.Icon.Information)
+
+                continue_button = msg_box.addButton("Continue", QMessageBox.ButtonRole.AcceptRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+
+                if msg_box.clickedButton() == continue_button:
+                    self.connected_to_unreal = True
+
+
+    def create_new_subcategory(self):
+        # check if a main category has been selected before allowing the user to create a new subcategory
+        if self.category_list.currentItem() is None:
+            QMessageBox.warning(self, "No Category Selected", "Please select a main category before creating a new subcategory.")
+            return
+
+        # get the selected main category
+        selected_category = self.category_list.currentItem()
+        selected_category_path = Path(selected_category.data(100)) # retrieve the stored path from the item data using the role 100
+
+        # prompt the user for the new subcategory name
+        new_subcategory_name, ok = QInputDialog.getText(self, "Create New Subcategory", "Enter the name of the new subcategory:")
+
+        if not ok or not new_subcategory_name:
+            return
+
+        # create the new subcategory directory
+        new_subcategory_path = selected_category_path / new_subcategory_name.strip()
+        new_subcategory_path.mkdir(parents=True, exist_ok=True)
+
+        # refresh the subcategory list to show the newly created subcategory
+        self.load_subcategories()
+
+    def open_asset_in_scene(self):
+        file_path = self.get_selected_asset_path()
+
+        if file_path is None:
+            QMessageBox.warning(self, "No Asset Selected", "Please select an asset to open in the scene.")
+            return
+        
+        if self.dcc_selection.currentText() == "Maya":
+        
+            if not self.connected_to_maya:
+                self.set_up_dcc_connection()
+
+            self.maya.send_command(self.maya.import_asset(file_path))
+
+        elif self.dcc_selection.currentText() == "3ds Max":
+            if not self.connected_to_max:
+                self.set_up_dcc_connection()
+            
+            self.max.send_command(self.max.import_asset(file_path))
+
+        elif self.dcc_selection.currentText() == "Unreal Engine":
+            if not self.connected_to_unreal:
+                self.set_up_dcc_connection()
+            asset_name = Path(file_path).stem  # Get the asset name without extension
+            self.unreal.send_asset_to_unreal(asset_name, file_path)
+
+        # log the asset pull in the database
+        self.log_asset_action("pull", f"{Path(file_path).name}")
+
+    # delete texture backup folder and move any existing textures into clean backup folder for each asset being submitted
+    def archive_texture_files(self, asset_directory):
+        textures_folder = asset_directory / "TEXTURES"
+        backup_folder = textures_folder / "BACKUP"
+        tmp_folder = textures_folder / "tmp"
+
+        # Guardrail: Wait up to 3 seconds for Maya/Max socket to finish writing to tmp
+        for _ in range(30):
+            if tmp_folder.exists() and any(tmp_folder.iterdir()):
+                break
+            time.sleep(0.1)
+
+        # Do NOT archive existing textures if tmp has nothing in it
+        if not tmp_folder.exists() or not any(tmp_folder.iterdir()):
+            print("Warning: tmp folder is empty. Aborting archive so TEXTURES is not wiped.")
+            return
+
+        textures_folder.mkdir(parents=True, exist_ok=True)
+        backup_folder.mkdir(parents=True, exist_ok=True)
+
+        # 1. Clear contents of BACKUP safely (avoids WinError 32)
+        for old_backup in backup_folder.iterdir():
+            if old_backup.is_file() or old_backup.is_symlink():
+                old_backup.unlink()
+            elif old_backup.is_dir():
+                shutil.rmtree(old_backup)
+
+        # 2. Move existing files in TEXTURES into BACKUP
+        for item in textures_folder.iterdir():
+            if item in (backup_folder, tmp_folder):
+                continue
+            if not item.is_dir() and not item.is_symlink():
+                shutil.move(str(item), str(backup_folder / item.name))
+
+        # 3. Promote staged files from tmp into TEXTURES and remove tmp
+        for staged_file in tmp_folder.iterdir():
+            if staged_file.is_file():
+                shutil.move(str(staged_file), str(textures_folder / staged_file.name))
+        tmp_folder.rmdir()
+        
+
+    def submit_new_asset(self):
+        # check if a subcategory has been selected before proceeding with asset submission
+        if self.new_asset_submission_directory == "":
+            QMessageBox.warning(self, "No Subcategory Selected", "Please select a subcategory type before submitting a new asset.")
+            return
+
+        # opens the dialog to create the new asset name and folder
+        submission_dialog = AssetSubmissionDialog(self.new_asset_submission_directory, self)
+        result = submission_dialog.exec()
+
+        if not result:
+            return
+
+        asset_name = submission_dialog.new_asset_name_submission.text()
+        asset_directory = self.new_asset_submission_directory / asset_name
+        asset_directory_name_fbx = asset_directory / f"{asset_name}.fbx"
+        asset_directory_name_ma = asset_directory / f"{asset_name}.ma"
+        asset_directory_name_max = asset_directory / f"{asset_name}.max"
+        textures_folder = asset_directory / "TEXTURES"
+
+        if self.dcc_selection.currentText() == "Maya":
+            if not self.connected_to_maya:
+                self.set_up_dcc_connection()
+
+            # zoom extents of selection in Maya
+            self.maya.send_command("cmds.viewFit()")
+
+            # send script folder to Maya default location for texture collection
+            self.send_script_to_maya_default_folder()
+
+            # 1. Stage textures into TEXTURES/tmp and repath Maya file nodes to TEXTURES/
+            self.maya.send_command(self.maya.collect_textures(textures_folder))
+
+            # 2. Empty BACKUP, move old TEXTURES to BACKUP, and promote tmp to TEXTURES
+            self.archive_texture_files(asset_directory)
+
+            # 3. Export files AFTER textures are in place and materials are repathed
+            self.maya.send_command(self.maya.export_selected_to_fbx(asset_directory_name_fbx))
+            self.maya.send_command(self.maya.export_selected_to_ma(asset_directory_name_ma))
+
+            # get the project directory for Maya where the thumbnail will be rendered to
+            maya_project_dir = self.maya.send_command(self.maya.get_maya_project_directory())
+
+            # temporarily create ambient light then render thumbnail then delete the temp light
+            self.maya.send_command(self.maya.create_ambient_light())
+            self.maya.send_command(self.maya.render_thumbnail())
+            self.maya.send_command(self.maya.delete_ambient_light())
+
+            # move the rendered thumbnail from the Maya project directory to the new asset folder
+            maya_file_name = Path(self.maya.send_command(self.maya.get_file_name())).stem
+            if maya_file_name == "":
+                maya_file_name = "untitled"
+            maya_file_name = f"{maya_file_name}.jpg"
+            thumbnail_source = Path(maya_project_dir.strip()) / "images" / "tmp" / maya_file_name
+            target_thumbnail_path = asset_directory / "thumbnail.jpg"
+            shutil.move(str(thumbnail_source), str(target_thumbnail_path))
+
+            # refresh the sub_subcategory_list to show the new asset folder
+            self.load_sub_subcategories()
+
+            # log the asset submission to the database
+            self.log_asset_action("push", f"{asset_name}.ma")
+            self.log_asset_action("push", f"{asset_name}.fbx")
+
+        elif self.dcc_selection.currentText() == "3ds Max":
+            if not self.connected_to_max:
+                self.set_up_dcc_connection()
+
+            # zoom extents of selection in Max
+            self.max.send_command(self.max.zoom_extents())
+
+            # 1. Stage textures into TEXTURES/tmp and repath Max materials to TEXTURES/
+            self.max.send_command(self.max.collect_textures(textures_folder))
+
+            # 2. Empty BACKUP, move old TEXTURES to BACKUP, and promote tmp to TEXTURES
+            self.archive_texture_files(asset_directory)
+
+            # 3. Export files AFTER textures are in place and materials are repathed
+            self.max.send_command(self.max.export_selected_as_fbx(asset_directory_name_fbx))
+            self.max.send_command(self.max.export_selected_as_max(asset_directory_name_max))
+
+            # Render thumbnail directly to asset_directory/thumbnail.jpg
+            self.max.send_command(self.max.render_thumbnail(asset_directory))
+
+            # refresh the sub_subcategory_list to show the new asset folder
+            self.load_sub_subcategories()
+
+            # log the asset submission to the database
+            self.log_asset_action("push", f"{asset_name}.max")
+            self.log_asset_action("push", f"{asset_name}.fbx")
+
+        elif self.dcc_selection.currentText() == "Unreal Engine":
+            if not self.connected_to_unreal:
+                self.set_up_dcc_connection()
+            # Unreal Engine integration is not implemented yet
+            print("Unreal Engine integration is not implemented yet.")
+            QMessageBox.information(self, "Not Implemented", "Exporting assets from Unreal Engine is not implemented yet.")
+            return
+
+
+
+
+    
+    def position_gear_button(self):
+        # calculate the x position of the button (window width - button width - margin)
+        x_pos = self.width() - 25 - 10
+        self.gear_button.setGeometry(x_pos, 10 , 25, 25)
+
+    # built in event in Qt that DOES NOT NEED TO BE CALLED. It is called automatically
+    def resizeEvent(self, event):
+        # recalculate position of gear_button when window is resized
+        self.position_gear_button()
+        super().resizeEvent(event)
+
+    def change_directory(self):
+        if self.check_admin_access():
+            self.directory_line.setReadOnly(False)
+
+    def audit_artist_submissions(self):
+        db_path = Path(self.directory_line.text()) / "production_log.db"
+        if not db_path.exists(): # check if the database file exists in the root of the asset library
+            QMessageBox.warning(self, "Database Not Found", "The production_log.db file was not foundin the asset library root.")
+            return
+
+        audit_dialog = DBAuditDialog(db_path,"artist", self) # create the object for the audit dialog window and give it the database path and tell it to search by artist name instead of asset name
+        audit_dialog.exec()
+
+    def audit_asset_submissions(self):
+        db_path = Path(self.directory_line.text()) / "production_log.db"
+        if not db_path.exists(): # check if the database file exists in the root of the asset library
+            QMessageBox.warning(self, "Database Not Found", "The production_log.db file was not foundin the asset library root.")
+            return
+
+        audit_dialog = DBAuditDialog(db_path,"asset", self) # create the object for the audit dialog window and give it the database path and tell it to search by asset name instead of artist name
+        audit_dialog.exec()
+
+    # pulls the starting directory from the settings.ini file
+    def settings_pull(self):
+        # get the path to the settings.ini file located in the Settings folder relative to this script
+        settings_path = Path(__file__).resolve().parent / "Settings" / "settings.ini"
+
+        # initialize the configparser
+        config = configparser.ConfigParser()
+        config.read(settings_path)
+        return config["LibraryDirectory"]["library_dir"]
+
+    def create_starting_library(self):
+        if self.check_admin_access():
+            self.set_base_directory()
+            starting_library_path = self.directory_line.text()
+            create_starting_library(starting_library_path) # create_starting_library() is a function defined at the top of this file, as well
+            # creates variable new path and adds "Asset_Library" to the "pathed" self.directory_line
+            new_path = Path(self.directory_line.text()) / "Asset_Library"
+            # converts new_path from a Path to plain text and plugs it into the directory_line
+            self.directory_line.setText(str(new_path))
+            self.set_base_directory()
+            # sets the directory for the production_log file. It will be created in the root of the Asset_Library folder. This is a sqlite3 database that will track all asset submissions and changes to the library
+            db_path = new_path / "production_log.db"
+            # connect to the database. If the database file does not exist, it will be created automatically
+            conn = sqlite3.connect(str(db_path), timeout = 15)
+            # create a cursor object to execute SQL commands
+            try:
+                cursor = conn.cursor()
+                # create a table to track asset submissions and changes if it doesn't exist yet
+                cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    artist TEXT,
+                    action TEXT,
+                    asset_name TEXT
+                    )''')
+
+            except sqlite3.Error as e:
+                QMessageBox.critical(self, "Database Error", f"An error occurred while connecting to the database: {e}")
+
+            finally:
+                # close the database connection
+                conn.close()
+
+
+    def set_base_directory(self):
+        self.current_directory = self.directory_line.text()
+        if not os.path.exists(self.current_directory):
+            QMessageBox.warning(self, "Directory Not Found", "The specified directory does not exist.")
+
+        else:
+            # innitiates the first list box
+            self.populate_list(Path(self.current_directory), self.category_list)
+
+    def check_admin_access(self):
+        # if already entered password, then access is automatic
+        if self.is_admin:
+            return True
+        
+        # if is_admin is false, then we'd skip the return above and continue to this code
+        dialog = PasswordDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            if dialog.get_password() == self.HARDCODED_PASSWORD:
+                self.is_admin = True
+                QMessageBox.information(self, "Access Granted", "You have access to the admin features.")
+
+                # set admin features to be visible now that the password has been entered correctly
+                self.admin_access_action.setVisible(False)
+                self.open_dir_button.setVisible(True)
+                self.create_library_action.setVisible(True)
+                self.change_directory_action.setVisible(True)
+                self.create_new_subcategory_button.setVisible(True)
+                return True
+            else:
+                QMessageBox.critical(self, "Incorrect Password", "The password entered is incorrect.")
+        return False        
+
+    # this method logs the asset push and pulls to a sqlite3 database
+    def log_asset_action(self, action, asset_name):
+        # get the current system user as the artist
+        artist = getpass.getuser()
+        db_path = Path(self.directory_line.text()) / "production_log.db" # saves the database in the root directory of the asset folder
+        conn = sqlite3.connect(str(db_path), timeout=15) # creates a connection to the database with a 15 second timeout to avoid "database is locked" errors when multiple users are trying to log at the same time
+
+        try:
+            cursor = conn.cursor()
+            # if db file is missing or doesn't exist, this will create it and then create the table
+            cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                artist TEXT,
+                action TEXT,
+                asset_name TEXT
+            )''')
+
+            # assign variable timestamp to the current date and time in the format YYYY-MM-DD HH:MM:SS
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # execute the SQL command to insert the log entry into the asset_log table
+            cursor.execute("INSERT INTO asset_log (timestamp, artist, action, asset_name) VALUES (?, ?, ?, ?)", (timestamp, artist, action, asset_name))
+
+            # commit the changes to the database
+            conn.commit()
+            print("Successfully logged asset action to database.")
+
+        except sqlite3.OperationalError as e:
+            QMessageBox.critical(self, "Database Error", f"An error occurred while logging asset action. The database was busy for too long: {e}")
+
+            # create local backup database if unable to push sql update to the main database. This will create a backup database in the same directory as this script and log the action there
+            backup_db_path = Path(__file__).resolve().parent / "production_log_backup.db"
+            backup_conn = sqlite3.connect(str(backup_db_path), timeout=15)
+            backup_cursor = backup_conn.cursor()
+            backup_cursor.execute('''CREATE TABLE IF NOT EXISTS asset_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                artist TEXT,
+                action TEXT,
+                asset_name TEXT
+            )''')
+            backup_cursor.execute("INSERT INTO asset_log (timestamp, artist, action, asset_name) VALUES (?, ?, ?, ?)", (timestamp, artist, action, asset_name))
+            backup_conn.commit()
+            backup_conn.close()
+
+        finally:
+            conn.close()
+
+
+    """this method clears the list_widget from any leftovers. It then looks at the directory and all its contents and says it only cares if the contents item is a folder.
+    It then takes each folder and removes the file directory from it so it is only the name of the folder but then stores that removed directory bit into slot 100 for that specific folder.
+    This way, we only see the folder's name but that folder still has its directory stored to it."""            
+    def populate_list(self, folder_path, list_widget):
+        # clear out any old text each time this is called
+        list_widget.clear()
+
+        folder_path = Path(folder_path)
+        # looks at all items in this directory
+        for path in sorted(folder_path.iterdir()):
+            # .is_dir only passes true if the item inside this folder is a folder
+            if path.is_dir():
+                # remove the directory and only keep the name of the found item
+                item = QListWidgetItem(path.name)
+
+                # put the full directory and name, combined, into slot 100
+                # this isn't visible to the user but the code reads it when clicked
+                # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                item.setData(100, path)
+
+                list_widget.addItem(item)
+
+    def clear_all_lists(self):
+                # wipe downstream columns clean so if you change your category selection, it doesn't get confused by your subcategory selection data
+        self.subcategory_list.clear()
+        self.sub_subcategory_list.clear()
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
+
+    """These are the methods that are called when a folder in the lists is selected that tells the next list what to display. They are called by the itemSelectionChanged action inside __innit__"""
+    def load_subcategories(self):
+        self.clear_all_lists()
+
+        # get whatever item is currently selected
+        selected_items = self.category_list.selectedItems()
+
+        if selected_items:
+            # if multiple lines are selected, it only returns the first
+            chosen_item = selected_items[0]
+
+            # look inside data slot 100 for the selected item and get the directory path
+            next_folder_path = chosen_item.data(100)
+
+            # runs the populate_list method and feeds it the file path for the selected folder we just established and also tells the populate_list method we want to send that data to the subcategory_list
+            self.populate_list(next_folder_path, self.subcategory_list)
+
+    """This follows the same logic as load_subcategories but it triggers when an item in column 2 is clicked, clears out only column 3, and populates column 3. """
+    def load_sub_subcategories(self):
+        # wipe the final column clean. We don't want to wipe the column above us
+        self.sub_subcategory_list.clear()
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
+
+        # determine which row was highlighted in the subcategory list
+        selected_items = self.subcategory_list.selectedItems()
+
+        if selected_items:
+            # if something is selected, we tell the code to only look at the first item selected
+            chosen_item = selected_items[0]
+
+            # look inside data slot 100 for the selected item and get the directory path
+            next_folder_path = chosen_item.data(100)
+
+            # runs the populate_list method and feeds it the file path for the selection we just established and also tells the populate list method we want to send that data to the sub_subcategory_list)
+            self.populate_list(next_folder_path, self.sub_subcategory_list)
+
+            # assign the selected subcategory folder's path to a self variable so it can be used to locate where a potential new asset will be created
+            self.new_asset_submission_directory = chosen_item.data(100)
+
+
+    def load_asset_folder_contents(self):
+        # wipe the contents of asset_folder_contents_list
+        self.asset_folder_contents_list.clear()
+        # clear the thumbnail displayed
+        self.preview_thumbnail.clear()
+        self.preview_thumbnail.setText("Select an asset to view preview")
+
+        # get the selected asset in the sub_subcategory list
+        selected_items = self.sub_subcategory_list.selectedItems()
+
+        if selected_items:
+            chosen_item = selected_items[0]
+
+            folder_path = chosen_item.data(100)
+            # added this line to test
+            self.asset_list_selection = chosen_item.data(100)
+            
+            # clear out any old text each time this is called
+            self.asset_folder_contents_list.clear()
+
+            folder_path = Path(folder_path)
+            geometry_files = []
+
+            
+
+            
+            self.thumbnail_dir = folder_path / "thumbnail.jpg"
+            if self.thumbnail_dir.exists():
+
+                pixmap = QPixmap(Path(self.thumbnail_dir))
+                self.preview_thumbnail.setPixmap(pixmap)
+
+            else:
+                root_dir = Path(__file__).resolve().parent
+                root_dir = root_dir / "Settings" / "thumbnail_Missing.jpg"
+                pixmap = QPixmap(root_dir)
+                self.preview_thumbnail.setPixmap(pixmap)
+
+
+            # walks the asset folder file and looks for  geo files and adds them to a list
+            for file in folder_path.rglob('*'):
+                if file.is_file():
+                    # check file extension
+                    ext = file.suffix.lower()
+                    if self.dcc_selection.currentText() == "Maya":
+
+                        if ext in (".obj", ".fbx", ".ma", ".mb"):
+                            geometry_files.append(file)
+                            # remove the directory and only keep the name of the file
+                            item = QListWidgetItem(file.name)
+
+                            # put the full directory and name, combined, into slot 100
+                            # this isn't visible to the user but the code reads it when clicked
+                            # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                            item.setData(100, file)
+
+                            self.asset_folder_contents_list.addItem(item)
+                    else:
+                        if ext in (".obj", ".fbx", ".max"):
+                            geometry_files.append(file)
+                            # remove the directory and only keep the name of the file
+                            item = QListWidgetItem(file.name)
+
+                            # put the full directory and name, combined, into slot 100
+                            # this isn't visible to the user but the code reads it when clicked
+                            # slot 100 is not a global slot, it is tied to whatever "item" we are on so itemA has a slot 100 and itemB has a slot 100 etc etc etc
+                            item.setData(100, file)
+
+                            self.asset_folder_contents_list.addItem(item)
+
+
+            # pulls the 4 most recent asset submissions from the database and displays them in the asset_info QLabel
+            conn = sqlite3.connect(Path(self.directory_line.text()) / "production_log.db", timeout=15) # open the database
+            cursor = conn.cursor()
+            clean_name = chosen_item.text().strip() # remove any leading or trailing whitespace from the asset name
+            cursor.execute("SELECT * FROM asset_log WHERE asset_name LIKE ? ORDER BY timestamp DESC LIMIT 4", (f"{clean_name}.%",)) # search for the asset name in the database and pull the 4 most recent info for that asset and list them from newest to oldest
+            asset_info = cursor.fetchall()
+
+            # assign variables for each row of the asset_info list and format them into a string to be displayed in the asset_info QLabel
+            # use if len(asset_info) >= 1, 2, 3, 4 to check if there are enough rows in the asset_info list before trying to access them. If there are not enough rows, the variable will be assigned an empty string
+            previous1 = ""
+            previous2 = ""
+            previous3 = ""
+            previous4 = ""
+            if len(asset_info) >= 1:
+                row1 = asset_info[0]
+                previous1 = f"{row1[2]} {row1[3]} {row1[1]}"
+
+            if len(asset_info) >= 2:
+                row2 = asset_info[1]
+                previous2 = f"{row2[2]} {row2[3]} {row2[1]}"
+
+            if len(asset_info) >= 3:
+                row3 = asset_info[2]
+                previous3 = f"{row3[2]} {row3[3]} {row3[1]}"
+
+            if len(asset_info) >= 4:
+                row4 = asset_info[3]
+                previous4 = f"{row4[2]} {row4[3]} {row4[1]}"
+
+            self.asset_info.setText(f"Asset Info: \n{previous1}\n{previous2}\n{previous3}\n{previous4}") # display the asset info in the asset_info QLabel
+            conn.close() # close the database connection
+
+
+
+    def get_selected_asset_path(self):
+        selected_items = self.asset_folder_contents_list.selectedItems()
+
+        if not selected_items:
+            return
+
+        chosen_item = selected_items[0]
+        file_path = chosen_item.data(100)
+        return file_path
+
+
+    def open_directory(self):
+        directory = self.directory_line.text()
+        os.startfile(directory)
+
+
+
+if __name__ == "__main__":
+    # tell windows to use a custom taskbar icon instead of the python logo
+    if sys.platform == "win32":
+        myappid = 'AssetLibraryTool.1.0'  # arbitrary string
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
+    icon_path = Path(__file__).resolve().parent / "icon.ico"
+    
+    #startup()
+    app = QApplication(sys.argv)
+
+    # set the window icon for the application
+    app.setWindowIcon(QIcon(str(icon_path)))
+    window = AssetLibraryApp()
+    window.show()
+    app.exec()
