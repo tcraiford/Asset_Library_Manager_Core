@@ -7,10 +7,10 @@ import time
 import sqlite3
 
 from datetime import datetime
-from maya_client import MayaClient
-from max_client import MaxClient
-from unreal_client import UnrealClient
-from requiredChecks import check_required_libraries
+from Classes.maya_client import MayaClient
+from Classes.max_client import MaxClient
+from Classes.unreal_client import UnrealClient
+from Classes.requiredChecks import check_required_libraries
 check_required_libraries()
 
 
@@ -26,8 +26,10 @@ from pathlib import Path
 # creates a basic starting library to be built upon. This is a starting point for the asset library
 def create_starting_library(base_directory_path):
     subfolders = []
+
+    starting_library_path = Path(__file__).resolve().parent / "Settings" / "starting_library.txt"
     # opens starting_library.txt and saves each line as a new directory to be created
-    with open("starting_library.txt", 'r') as file:
+    with open(starting_library_path, 'r') as file:
         # open the file and read only one line at a time
         for line in file:
             # check if the line is blank
@@ -398,7 +400,7 @@ class AssetLibraryApp(QMainWindow):
             # what the file would be called if it already exists in the default directory
             possible_script_dir = script_dir / "maya_scripts.py"
             # directory of THIS file and all the extra bits
-            program_dir = Path(__file__).resolve().parent / "maya_scripts.py"
+            program_dir = Path(__file__).resolve().parent / "DCC_Scripts" / "maya_scripts.py"
     
             # if the maya_scripts.py file isn't in the main scripts folder, put a copy there
             if not possible_script_dir.is_file():
@@ -497,6 +499,10 @@ class AssetLibraryApp(QMainWindow):
 
     def open_asset_in_scene(self):
         file_path = self.get_selected_asset_path()
+
+        if file_path is None:
+            QMessageBox.warning(self, "No Asset Selected", "Please select an asset to open in the scene.")
+            return
         
         if self.dcc_selection.currentText() == "Maya":
         
@@ -699,9 +705,12 @@ class AssetLibraryApp(QMainWindow):
 
     # pulls the starting directory from the settings.ini file
     def settings_pull(self):
+        # get the path to the settings.ini file located in the Settings folder relative to this script
+        settings_path = Path(__file__).resolve().parent / "Settings" / "settings.ini"
+
         # initialize the configparser
         config = configparser.ConfigParser()
-        config.read("settings.ini")
+        config.read(settings_path)
         return config["LibraryDirectory"]["library_dir"]
 
     def create_starting_library(self):
@@ -928,7 +937,7 @@ class AssetLibraryApp(QMainWindow):
 
             else:
                 root_dir = Path(__file__).resolve().parent
-                root_dir = root_dir / "thumbnail_Missing.jpg"
+                root_dir = root_dir / "Settings" / "thumbnail_Missing.jpg"
                 pixmap = QPixmap(root_dir)
                 self.preview_thumbnail.setPixmap(pixmap)
 
