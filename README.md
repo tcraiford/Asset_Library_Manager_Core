@@ -3,13 +3,15 @@
 This is a desktop application that manages a shared 3d asset repository and drives Maya and 3ds Max remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
 
 ## How to Use
+Walkthrough video for once you have launched the tool the first time: https://youtu.be/HVFGAgcMCXw?si=Lnsrdx2MS_HA6GlR
 
 1. Change the *settings.example.ini* to *settings.ini* and set “library\_dir” to wherever you want the library to live
 2. Open the port:
 
-   1. For Maya, run the *Maya\_Port\_Open.py* in the script editor, set to python
-   2. For Max, run the *Max\_Port\_Open.py* in a new script inside of Max, set to python
-   3. For Unreal, copy the remote\_execution.py from your unreal install location and version \\Engine\\Plugins\\Experimental\\PythonScriptPlugin\\Content\\Python and place it in the tool's root next to the asset\_library.py
+   A. For Maya, run the *Maya\_Port\_Open.py*, located in DCC_PortOpenScripts, in the script editor, set to python
+   B. For Max, run the *Max\_Port\_Open.py*, located in DCC_PortOpenScripts, in a new script inside of Max, set to python
+      *Note: In the walkthrough video, I had created buttons that would open the ports to make the process faster in my DCC software however you can simply copy/paste the contents of the appropriate script into your software's python environment to do the same thing.
+   4. For Unreal, copy the remote\_execution.py from your unreal install location and version \\Engine\\Plugins\\Experimental\\PythonScriptPlugin\\Content\\Python and place it in the tool's root next to the asset\_library.py
 3. Run *asset\_library.py* to launch the tool
 
 ## Why is it needed?
