@@ -1,6 +1,6 @@
 # Asset Library Manager
 
-This is a desktop application that manages a shared 3d asset repository and drives Maya and 3ds Max remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
+This is a desktop application that manages a shared 3d asset repository and drives Maya, 3ds Max, and Unreal remotely over a TCP client/server protocol using socket ports in python. Built to solve a real production problem: keeping a team’s 3d models, textures, and file references consistent and discoverable instead of scattered across individual artist’s machines.
 
 ## How to Use
 Walkthrough video for once you have launched the tool the first time: https://youtu.be/HVFGAgcMCXw?si=Lnsrdx2MS_HA6GlR
@@ -12,7 +12,8 @@ Walkthrough video for once you have launched the tool the first time: https://yo
    B. For Max, run the *Max\_Port\_Open.py*, located in DCC_PortOpenScripts, in a new script inside of Max, set to python<br>
       *Note: In the walkthrough video, I had created buttons that would open the ports to make the process faster in my DCC software however you can simply copy/paste the contents of the appropriate script into your software's python environment to do the same thing.*
 3. For Unreal, copy the remote\_execution.py from your unreal install location and version \\Engine\\Plugins\\Experimental\\PythonScriptPlugin\\Content\\Python and place it in the tool's root next to the asset\_library.py
-4. Run *asset\_library.py* to launch the tool
+4. For Unreal, enable Python Editor Script Plugin under Plugins
+5. Run *asset\_library.py* to launch the tool
 
 ## Why is it needed?
 
@@ -38,20 +39,23 @@ If a scene points all of its references to hundreds of assets, textures and mode
 * Detects if an asset by that name already exists and asks if the user wants to create a new version of that asset or choose a different name for a fresh asset submission
 * If versioning up an asset, the previous version is renamed to “ARCHIVE\_” as a prefix and a version number as the suffix and moved into the ARCHIVE folder for that asset in the library
 * Identifies any texture files associated with the model being submitted and copies them to the asset’s TEXTURES folder and redirects the model to point to that library submission location instead of scattered across the artist’s local hard drive while moving the previous texture image files into a one-generation BACKUP folder (this is to prevent archiving hundreds of image files over the many versions of the model)
+* Create a json file "map" of which textures are for each material on the model to be rebuilt by Unreal when pulling published assets into Unreal
 * Automatically render a thumbnail of the model submission to be displayed in the Asset Library Tool
 
 ### Asset Pulling Workflow
 
 * User can browse through the library of submitted assets with the tool and import the current version or an ARCHIVED version of the asset into their active Maya or 3ds Max scene
 * When an asset is opened in the modeling software via the library tool, it is duplicated from the library into their active session but the original is never directly opened. This prevents artists from making unwanted changes to a file and using the modeling software's "Save" to make changes to the published file. If they make changes and publish the model with the library tool, it will create a new version of the asset, but the original version that was pulled will be preserved
+* When pulling assets into Unreal, the tool reads the json file created by publishing an asset which maps the asset's collected textures to the appropriate slots to be assembled into a material in unreal automatically built from a master material in Unreal
 
-### Remote Control of Maya and 3ds Max
+### Remote Control of Maya, 3ds Max, and Unreal
 
 * MayaClient and MaxClient connect to the commandPort and Scripting Listener over raw TCP sockets. Maya/Max are the listener/server while the desktop app is the client
 * The hardest part wasn’t establishing the networking, it was Maya and Max’s protocol behavior: a single self-contained expression sent to the port would evaluate and return its value over the socket, but multi-step code sent the same way doesn’t send anything back. It can run and still leave the client with no return value and no error. These silent failures were extremely difficult to diagnose
 * More complex methods that needed to utilize loops and if/else statements were unable to be reliably sent through the socket port due to newlines and indentation often breaking how Maya and Max executed code and since anything sent through the ports needed to be a string. The solution was to put more complex methods into their own class file and have it placed where Maya can load it or have Max load it directly from the tool’s directory and use the string sent through the socket port to load, instantiate, and execute the methods from that class file rather than trying to format it all to pass through the port
 * The tool uses short timeouts for quick commands while using longer timeouts for commands that are expected to potentially take longer such as file exports
 * Maya also pads its socket responses with trailing null bytes which broke downstream string comparisons so these needed to be cleaned
+* Unreal was the easiest to incorporate since Epic had already built a lot of the TCP socket options into the Unreal plugin
 
 ### Other
 
@@ -83,9 +87,8 @@ The library’s base directory is read from *settings.ini* at launch rather than
 Python, PySide6 (QT for Python), raw TCP sockets, Autodesk Maya Python API (maya.cmds) via commandPort, Autodesk 3ds Max Python API (pymxs)
 
 ## Future Updates
-
-* Submission tracking with an SQL Database - record who submitted/pulled an asset and when, for basic production accountability
-* Unreal Engine integration- push selected assets directly into a connected Unreal project’s content browser
+* Bug tracking
+* User feedback improvements
 
 
 
